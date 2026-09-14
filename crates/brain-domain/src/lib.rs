@@ -7,6 +7,7 @@
 //! Su lógica puede y debe compilarse y validarse en milisegundos.
 
 pub mod model;
+pub mod ports;
 
 #[cfg(test)]
 mod tests {

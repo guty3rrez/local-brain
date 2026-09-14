@@ -1,5 +1,5 @@
 [package]
-name = "brain-domain"
+name = "brain-infrastructure"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,13 +7,9 @@ authors.workspace = true
 
 [dependencies]
 brain-core = { path = "../brain-core" }
+brain-domain = { path = "../brain-domain" }
+brain-application = { path = "../brain-application" }
 thiserror = { workspace = true }
-serde = { workspace = true }
-uuid = { workspace = true }
-chrono = { workspace = true }
+tracing = { workspace = true }
 async-trait = { workspace = true }
-sha2 = { workspace = true }
-
-[dev-dependencies]
-rstest = { workspace = true }
 tokio = { workspace = true }

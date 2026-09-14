@@ -1,0 +1,16 @@
+[package]
+name = "brain-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+brain-core = { path = "../brain-core" }
+brain-domain = { path = "../brain-domain" }
+brain-application = { path = "../brain-application" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }

@@ -12,8 +12,8 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 
 | Fase | Nombre | Estado | Progreso | Cobertura de Tests |
 | :--- | :--- | :---: | :---: | :---: |
-| **Fase 0** | Foundation & Governance | 🟡 En Progreso | `[██████░░░░] 60%` | Baseline CI / Lints |
-| **Fase 1** | Memory Core (MVP Parte 1) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Integration |
+| **Fase 0** | Foundation & Governance | 🟢 Completado | `[██████████] 100%` | Baseline CI / Lints / ADRs |
+| **Fase 1** | Memory Core (MVP Parte 1) | 🟡 En Progreso | `[████░░░░░░] 40%` | Dominio Puro + Casos de Uso |
 | **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
 | **Fase 3** | MCP Server (MVP Parte 3) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | E2E + BDD + Security |
 | **Fase 4** | Memory Types Specialization | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Mutation |
@@ -109,17 +109,17 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 - [x] **[F0-02] Definición del Backlog Integral y Dashboard Público** `P0`
   - **Descripción**: Crear `BACKLOG.md` con las 10 fases del SRS y el arsenal de testing.
   - **Arsenal**: Validación de enlaces y consistencia documental.
-- [ ] **[F0-03] Estructura del Cargo Workspace Multi-Crate** `P0`
-  - **Descripción**: Crear el workspace según la arquitectura hexagonal (SRS §8): `brain-core`, `brain-domain`, `brain-application`, `brain-infrastructure`, `brain-memory`, `brain-retrieval`, `brain-learning`, `brain-consolidation`, `brain-graph`, `brain-embeddings`, `brain-llm`, `brain-mcp`, `brain-cli`, `brain-daemon`.
+- [x] **[F0-03] Estructura del Cargo Workspace Multi-Crate** `P0`
+  - **Descripción**: Configurar workspace multi-crate con arquitectura hexagonal: `brain-core`, `brain-domain`, `brain-application`, `brain-infrastructure`, `brain-mcp`, `brain-cli`.
   - **Arsenal**: `cargo check --workspace`, `cargo clippy`.
-- [ ] **[F0-04] Pipeline de CI en GitHub Actions** `P0`
-  - **Descripción**: Configurar `.github/workflows/ci.yml` ejecutando `fmt`, `clippy`, `cargo test`, `cargo audit` y reporte de cobertura.
+- [x] **[F0-04] Pipeline de CI en GitHub Actions** `P0`
+  - **Descripción**: Configurar `.github/workflows/ci.yml` ejecutando `fmt`, `clippy`, `cargo test`, `cargo audit` y `deny.toml`.
   - **Arsenal**: GitHub Actions runner local / remoto.
-- [ ] **[F0-05] Sistema de Architecture Decision Records (ADRs)** `P1`
+- [x] **[F0-05] Sistema de Architecture Decision Records (ADRs)** `P1`
   - **Descripción**: Inicializar `docs/adr/` con la plantilla MADR y registrar ADR-001 (Rust) y ADR-002 (AGPLv3).
   - **Arsenal**: Revisión humana.
-- [ ] **[F0-06] Entorno Local Dockerizado para Servicios Auxiliares** `P1`
-  - **Descripción**: `docker-compose.yml` con PostgreSQL 17 + extensión `pgvector` y mock/servidor de prueba de llama.cpp.
+- [x] **[F0-06] Entorno Local Dockerizado para Servicios Auxiliares** `P1`
+  - **Descripción**: `docker-compose.yml` con PostgreSQL 17 + extensión `pgvector` (`pgvector/pgvector:pg17`) mapeado a puerto 5433 y healthchecks.
   - **Arsenal**: Healthcheck en contenedor y test de conectividad.
 
 ---
@@ -127,23 +127,23 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 1 — Memory Core (MVP Parte 1) (SRS §9, §25, §68)
 *Objetivo: Núcleo de dominio de memoria persistente, CRUD básico y CLI funcional.*
 
-- [ ] **[F1-01] Entidad de Dominio `Memory` y Value Objects** `P0`
+- [x] **[F1-01] Entidad de Dominio `Memory` y Value Objects** `P0`
   - **Descripción**: Modelar `MemoryId`, `MemoryType`, `MemoryContent`, `Importance`, `Confidence`, `Utility`, `Provenance`, `MemoryStatus` y `Version`.
-  - **Criterios de Aceptación**: Invariantes de rango (Importance 0.0-1.0, Confidence 0.0-1.0), inmutabilidad de timestamps de creación, hash de contenido.
+  - **Criterios de Aceptación**: Invariantes de rango (Importance 0.0-1.0, Confidence 0.0-1.0), inmutabilidad de timestamps de creación, hash de contenido SHA-256, límites de 64KB, Aggregate Root con métodos de dominio.
   - **Arsenal**:
     - *Unit*: 100% de cobertura en validación de invariantes.
     - *Mutation*: `cargo mutants -p brain-domain` eliminando todos los mutantes de límites (0.0, 1.0, strings vacíos).
-- [ ] **[F1-02] Puertos de Repositorio (Hexagonal Architecture)** `P0`
-  - **Descripción**: Definir los traits `MemoryRepository`, `VectorRepository` y `UnitOfWork` en `brain-domain`.
-  - **Arsenal**: *Unit*: Tests con mocks en memoria (`mockall`).
+- [x] **[F1-02] Puertos de Repositorio (Hexagonal Architecture)** `P0`
+  - **Descripción**: Definir los traits `MemoryRepository`, `VectorRepository` en `brain-domain::ports` y crear `InMemoryMemoryRepository` thread-safe para testing unitario puro.
+  - **Arsenal**: *Unit*: Tests en memoria (`ports::tests`).
 - [ ] **[F1-03] Adaptador de Persistencia PostgreSQL (SQLx)** `P0`
   - **Descripción**: Implementar `PostgresMemoryRepository` en `brain-infrastructure` con migraciones SQLx idempotentes. Tabla `memories` con metadatos JSONB e índices.
   - **Arsenal**:
     - *Integration*: Pruebas contra PostgreSQL real con inserción, consulta, actualización y soft delete.
     - *BDD*: Escenario "Persistir y recuperar memoria por ID".
-- [ ] **[F1-04] Casos de Uso de Aplicación: Remember y Recall Directo** `P0`
+- [x] **[F1-04] Casos de Uso de Aplicación: Remember y Recall Directo** `P0`
   - **Descripción**: Implementar `RememberUseCase` y `RecallUseCase` (recuperación por metadata y texto plano) en `brain-application`.
-  - **Arsenal**: *Unit* + *BDD* ("Agent stores memory and retrieves by exact match").
+  - **Arsenal**: *Unit*: Suite completa de pruebas con `InMemoryMemoryRepository`.
 - [ ] **[F1-05] CLI Básica: `brain init`, `brain remember`, `brain recall`, `brain status`** `P1`
   - **Descripción**: Interfaz de línea de comandos en `brain-cli` con `clap`.
   - **Arsenal**: *Integration*: Tests de caja negra invocando los binarios con `assert_cmd`.

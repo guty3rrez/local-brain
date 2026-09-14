@@ -24,3 +24,6 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 rstest = "0.23"
 mockall = "0.13"
+async-trait = "0.1"
+sha2 = "0.10"
+clap = { version = "4.5", features = ["derive", "env"] }
