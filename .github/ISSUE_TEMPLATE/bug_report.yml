@@ -1,0 +1,45 @@
+name: 🐛 Reporte de Bug
+description: Informa de un error o comportamiento inesperado en Local Brain
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por tomarte el tiempo de reportar este problema. Antes de crearlo, verifica si ya existe un issue similar.
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción del Problema
+      description: Explica de forma clara qué ocurrió y qué esperabas que ocurriera.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Pasos para Reproducir
+      description: Secuencia exacta de pasos para reproducir el fallo.
+      placeholder: |
+        1. Iniciar daemon con `brain daemon`
+        2. Enviar llamada MCP `brain_recall` con payload...
+        3. Observar el error...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Entorno y Hardware
+      description: Información sobre tu sistema operativo, versión de Rust, GPU y versión de PostgreSQL.
+      placeholder: |
+        - SO: Linux (Arch / Ubuntu 24.04 / Fedora)
+        - Rust: rustc 1.85+
+        - GPU: NVIDIA RTX 3050 (o CPU)
+        - PostgreSQL: 17 + pgvector 0.8
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs o Trazas de Error
+      description: Pega aquí los logs generados por `tracing` o salida de terminal.
+      render: shell

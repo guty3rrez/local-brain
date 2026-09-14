@@ -1,0 +1,57 @@
+# ==============================================================================
+# Local Brain - .gitignore
+# ==============================================================================
+
+# --- Rust & Cargo ---
+/target/
+**/*.rs.bk
+*.pdb
+
+# --- Local AI Models & Weights (never commit heavy weights) ---
+models/
+*.gguf
+*.bin
+*.safetensors
+*.onnx
+llama.cpp/
+
+# --- Database & Persistent Local Storage ---
+postgres-data/
+.postgres-data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+/data/
+
+# --- Environment & Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.p12
+
+# --- Testing, Coverage & Mutation Artifacts ---
+coverage/
+*.profraw
+*.profdata
+mutants.out/
+mutants.out.old/
+cobertura.xml
+lcov.info
+
+# --- OS & Editor Artifacts ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- Daemon / Runtime logs & sockets ---
+*.log
+brain.sock
+brain.pid

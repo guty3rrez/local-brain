@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Local Brain Contributors"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/local-brain/local-brain"
+readme = "README.md"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Dependencias compartidas del workspace
+tokio = { version = "1.40", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+rstest = "0.23"
+mockall = "0.13"

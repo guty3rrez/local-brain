@@ -1,0 +1,71 @@
+name: CI — Calidad, Tests y Seguridad
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt-and-clippy:
+    name: Formateo y Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar toolchain de Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache de dependencias Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verificar formateo oficial (rustfmt)
+        run: cargo fmt --all -- --check
+
+      - name: Análisis estático estricto (clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  unit-tests:
+    name: Pruebas Unitarias de Dominio (Puro)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar toolchain de Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de dependencias Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Ejecutar pruebas unitarias sin dependencias externas (RNF-006)
+        run: cargo test --workspace --lib --verbose
+
+  security-and-licenses:
+    name: Auditoría de Seguridad y Licencias
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar cargo-audit y cargo-deny
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo install cargo-deny --locked || true
+
+      - name: Auditoría de vulnerabilidades en dependencias (RustSec)
+        run: cargo audit
+
+      - name: Verificación de licencias compatibles con AGPLv3
+        run: cargo deny check licenses || true

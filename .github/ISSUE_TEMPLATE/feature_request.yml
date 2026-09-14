@@ -1,0 +1,47 @@
+name: ✨ Solicitud de Feature / Mejora
+description: Propón una nueva funcionalidad o mejora alineada con la visión de Local Brain
+title: "[FEAT]: "
+labels: ["enhancement", "backlog-candidate"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Las nuevas funcionalidades deben respetar los principios de **Local-first**, **Independencia de Proveedores** y **Arquitectura Hexagonal**.
+  - type: textarea
+    id: problem
+    attributes:
+      label: ¿Qué problema o limitación resuelve esta feature?
+      description: Explica la necesidad o el caso de uso concreto (por ejemplo, agentes olvidando decisiones en proyectos largos).
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Solución Propuesta
+      description: Describe cómo imaginas que debería funcionar la funcionalidad y qué interfaces (MCP, CLI, API) impactaría.
+    validations:
+      required: true
+  - type: dropdown
+    id: phase-alignment
+    attributes:
+      label: Alineación con el Backlog / Fases del SRS
+      description: Selecciona la fase del SRS en la que encajaría esta propuesta.
+      options:
+        - "Fase 0: Foundation & Governance"
+        - "Fase 1: Memory Core"
+        - "Fase 2: Embeddings & Vector Search"
+        - "Fase 3: MCP Server"
+        - "Fase 4: Memory Types"
+        - "Fase 5: Knowledge Graph"
+        - "Fase 6: Learning Engine"
+        - "Fase 7: Consolidation & Reflection"
+        - "Fase 8: Advanced Retrieval"
+        - "Fase 9: Hardening & Benchmarking"
+        - "Otra / Nueva categoría"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas Consideradas
+      description: ¿Qué otras opciones o soluciones existentes evaluaste?

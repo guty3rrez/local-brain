@@ -1,0 +1,37 @@
+name: 📐 Propuesta Arquitectónica / RFC (ADR)
+description: Propón una decisión arquitectónica estructural (ADR) para evaluación comunitaria
+title: "[RFC/ADR]: "
+labels: ["rfc", "architecture", "human-review-required"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Los Architecture Decision Records (ADRs) documentan elecciones de diseño significativas y perdurables para Local Brain (SRS §47).
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto y Planteamiento del Problema
+      description: ¿Cuál es el problema arquitectónico o técnico que requiere una decisión?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decisión Propuesta
+      description: ¿Qué solución técnica o patrón específico propones adoptar?
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consecuencias Positivas y Negativas
+      description: Ventajas, riesgos, impacto en la complejidad del sistema y restricciones introducidas.
+    validations:
+      required: true
+  - type: textarea
+    id: clean-architecture-impact
+    attributes:
+      label: Impacto en Clean Architecture y Dominio Puro (RNF-006)
+      description: Confirma que la propuesta mantiene a `brain-domain` libre de dependencias externas.
+    validations:
+      required: true
