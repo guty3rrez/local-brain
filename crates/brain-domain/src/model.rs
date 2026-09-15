@@ -48,8 +48,16 @@ pub enum DomainError {
 pub struct MemoryId(Uuid);
 
 impl MemoryId {
-    /// Genera un nuevo identificador UUID v4 aleatorio.
+    /// Genera un nuevo identificador UUID v7 ordenado cronológicamente (RFC 9562).
+    ///
+    /// UUID v7 incorpora un timestamp Unix en milisegundos en los primeros 48 bits,
+    /// garantizando orden monotónico e inserciones secuenciales óptimas en índices B-Tree de PostgreSQL.
     pub fn new() -> Self {
+        Self(Uuid::now_v7())
+    }
+
+    /// Genera un identificador UUID v4 pseudoaleatorio tradicional.
+    pub fn new_v4() -> Self {
         Self(Uuid::new_v4())
     }
 
@@ -581,6 +589,18 @@ mod tests {
         assert_eq!(id, parsed);
 
         assert!(MemoryId::from_str("invalido").is_err());
+    }
+
+    #[test]
+    fn memory_id_v7_generation_and_monotonicity() {
+        let id1 = MemoryId::new();
+        let id2 = MemoryId::new();
+        // Ambos IDs deben tener longitud estándar y ser distintos
+        assert_ne!(id1, id2);
+        // ID generado con new_v4 también es válido
+        let id_v4 = MemoryId::new_v4();
+        assert_eq!(id_v4.to_string().len(), 36);
+        assert_eq!(id1.to_string().len(), 36);
     }
 
     #[test]

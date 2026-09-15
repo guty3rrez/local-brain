@@ -40,7 +40,7 @@ Monitorea el avance de las fases definidas en la especificación formal ([`SRS �
 | Fase | Nombre | Estado | Progreso | Alcance Clave |
 | :--- | :--- | :---: | :---: | :--- |
 | **Fase 0** | **Foundation & Governance** | 🟡 *En Progreso* | `[██████░░░░] 60%` | Repositorio, AGPLv3, Backlog, Guías de Agentes, CI |
-| **Fase 1** | **Memory Core (MVP)** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Dominio puro, PostgreSQL (SQLx), CRUD y CLI básica |
+| **Fase 1** | **Memory Core (MVP)** | 🟡 *En Progreso* | `[████████░░] 80%` | Dominio puro, PostgreSQL (SQLx), CRUD y CLI básica |
 | **Fase 2** | **Embeddings & Vector Search (MVP)** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | llama.cpp local, pgvector, búsqueda semántica |
 | **Fase 3** | **Model Context Protocol (MCP) (MVP)** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Servidor MCP (stdio/SSE), tools para agentes de IA |
 | **Fase 4** | **Especialización de Tipos de Memoria** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Working, Episodic, Semantic, Procedural, Associative |

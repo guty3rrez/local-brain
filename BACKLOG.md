@@ -136,7 +136,7 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 - [x] **[F1-02] Puertos de Repositorio (Hexagonal Architecture)** `P0`
   - **Descripción**: Definir los traits `MemoryRepository`, `VectorRepository` en `brain-domain::ports` y crear `InMemoryMemoryRepository` thread-safe para testing unitario puro.
   - **Arsenal**: *Unit*: Tests en memoria (`ports::tests`).
-- [ ] **[F1-03] Adaptador de Persistencia PostgreSQL (SQLx)** `P0`
+- [x] **[F1-03] Adaptador de Persistencia PostgreSQL (SQLx)** `P0`
   - **Descripción**: Implementar `PostgresMemoryRepository` en `brain-infrastructure` con migraciones SQLx idempotentes. Tabla `memories` con metadatos JSONB e índices.
   - **Arsenal**:
     - *Integration*: Pruebas contra PostgreSQL real con inserción, consulta, actualización y soft delete.
