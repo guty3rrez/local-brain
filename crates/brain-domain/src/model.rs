@@ -521,9 +521,12 @@ impl Memory {
         Ok(())
     }
 
-    /// Comprueba si la memoria está activa para consultas operativas normales.
+    /// Comprueba si la memoria está activa para consultas operativas normales (SRS §9.1, §12.3).
     pub fn is_active(&self) -> bool {
-        self.status == MemoryStatus::Active
+        matches!(
+            self.status,
+            MemoryStatus::Active | MemoryStatus::PendingEmbedding
+        )
     }
 }
 

@@ -14,7 +14,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | :--- | :--- | :---: | :---: | :---: |
 | **Fase 0** | Foundation & Governance | 🟢 Completado | `[██████████] 100%` | Baseline CI / Lints / ADRs |
 | **Fase 1** | Memory Core (MVP Parte 1) | 🟢 Completado | `[██████████] 100%` | Dominio Puro + Casos de Uso + Persistencia + CLI |
-| **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | 🟡 En Progreso | `[░░░░░░░░░░] 0%` | Integration + BDD |
+| **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | 🟢 Completado | `[██████████] 100%` | Integration + BDD + Wiremock + pgvector |
 | **Fase 3** | MCP Server (MVP Parte 3) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | E2E + BDD + Security |
 | **Fase 4** | Memory Types Specialization | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Mutation |
 | **Fase 5** | Knowledge Graph & Relations | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Integration |
@@ -153,19 +153,19 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 2 — Embeddings & Vector Search (MVP Parte 2) (SRS §12, §25, §68)
 *Objetivo: Integración de embeddings locales con llama.cpp y búsqueda semántica con pgvector.*
 
-- [ ] **[F2-01] Puerto y Adaptador de Embeddings Locales** `P0`
-  - **Descripción**: Trait `EmbeddingProvider` y adaptador HTTP para servidor local de llama.cpp (`/embedding`).
-  - **Arsenal**: *Integration*: Mock server con `wiremock` simulando respuestas vectoriales de llama.cpp.
-- [ ] **[F2-02] Pipeline Asíncrono de Generación de Embeddings** `P0`
-  - **Descripción**: Si el runtime de embeddings no responde, la memoria se guarda con `embedding_status = Pending` sin bloquear la creación (SRS §12.3).
+- [x] **[F2-01] Puerto y Adaptador de Embeddings Locales** `P0`
+  - **Descripción**: Trait `EmbeddingProvider` (768 dimensiones estándar) y adaptador HTTP `LlamaCppEmbeddingProvider` para servidor local de llama.cpp (`/embedding` y `/v1/embeddings`). Mocks puros en memoria (`InMemoryEmbeddingProvider`).
+  - **Arsenal**: *Integration*: Mock server con `wiremock` simulando respuestas vectoriales y timeouts de llama.cpp.
+- [x] **[F2-02] Pipeline Asíncrono de Generación de Embeddings** `P0`
+  - **Descripción**: Si el runtime de embeddings no responde, la memoria se guarda con `status = MemoryStatus::PendingEmbedding` sin bloquear la creación (SRS §12.3). Implementación de `EmbedPendingUseCase` y subcomando CLI `brain embed-pending`.
   - **Arsenal**:
-    - *Unit*: Verificación del estado diferido.
-    - *BDD*: "Given offline embedding provider, When memory is stored, Then status is pending and memory is saved".
-- [ ] **[F2-03] Búsqueda Vectorial Semántica con pgvector** `P0`
-  - **Descripción**: Índice HNSW en PostgreSQL (`cosine_distance` u `inner_product`), consultas vectoriales `LIMIT K`.
+    - *Unit*: Verificación del estado diferido y reintento.
+    - *BDD*: Escenarios Gherkin probados en cucumber.
+- [x] **[F2-03] Búsqueda Vectorial Semántica con pgvector** `P0`
+  - **Descripción**: Índice HNSW en PostgreSQL 17 (`vector_cosine_ops`), columna `vector(768)`, consultas vectoriales `LIMIT K`, y enriquecimiento de `RecallUseCase` con parámetro `query`.
   - **Arsenal**:
-    - *Integration*: Tests de precisión semántica básica con embeddings precalculados.
-    - *Benchmarks*: Medir latencia de consulta vectorial con 10.000 vectores.
+    - *Integration*: Tests de precisión semántica y ordenamiento coseno en PostgreSQL real.
+    - *BDD*: Escenario "Recuperación semántica de recuerdos indexados con vectores de 768 dimensiones".
 
 ---
 

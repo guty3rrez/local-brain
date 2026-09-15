@@ -7,8 +7,10 @@
 //! - Generación local de embeddings con llama.cpp
 //! - Almacenamiento y cachés en disco local
 
+pub mod embeddings;
 pub mod persistence;
 
+pub use embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
 pub use persistence::PostgresMemoryRepository;
 
 pub const INFRASTRUCTURE_LAYER: &str = "brain-infrastructure";

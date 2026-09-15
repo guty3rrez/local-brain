@@ -7,7 +7,8 @@ use brain_domain::model::{
     Confidence, DomainError, Importance, Memory, MemoryContent, MemoryId, MemoryStatus, MemoryType,
     Provenance, Utility, Version,
 };
-use brain_domain::ports::MemoryRepository;
+use brain_domain::ports::{MemoryRepository, VectorRepository};
+use pgvector::Vector;
 
 /// Adaptador secundario de persistencia relacional en PostgreSQL mediante SQLx (SRS §25.1).
 #[derive(Debug, Clone)]
@@ -44,6 +45,7 @@ impl MemoryRepository for PostgresMemoryRepository {
         let provenance_json = serde_json::to_value(&memory.source).map_err(|e| {
             DomainError::RepositoryError(format!("Error al serializar provenance: {e}"))
         })?;
+        let pg_vector = memory.embedding.as_ref().map(|v| Vector::from(v.clone()));
 
         let result = sqlx::query(
             r#"
@@ -51,12 +53,12 @@ impl MemoryRepository for PostgresMemoryRepository {
                 id, memory_type, content_text, content_hash, summary,
                 project, agent, importance, confidence, utility,
                 status, version, provenance, metadata, created_at,
-                updated_at, last_retrieved_at
+                updated_at, last_retrieved_at, embedding
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15,
-                $16, $17
+                $16, $17, $18
             )
             "#,
         )
@@ -77,6 +79,7 @@ impl MemoryRepository for PostgresMemoryRepository {
         .bind(memory.created_at)
         .bind(memory.updated_at)
         .bind(memory.last_retrieved_at)
+        .bind(pg_vector)
         .execute(&self.pool)
         .await;
 
@@ -98,7 +101,7 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at
+                   updated_at, last_retrieved_at, embedding
             FROM memories
             WHERE id = $1
             "#,
@@ -124,9 +127,9 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at
+                   updated_at, last_retrieved_at, embedding
             FROM memories
-            WHERE project = $1 AND status = 'active'
+            WHERE project = $1 AND status NOT IN ('soft_deleted', 'archived')
             ORDER BY created_at DESC
             LIMIT $2
             "#,
@@ -154,9 +157,9 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at
+                   updated_at, last_retrieved_at, embedding
             FROM memories
-            WHERE memory_type = $1 AND status = 'active'
+            WHERE memory_type = $1 AND status NOT IN ('soft_deleted', 'archived')
             ORDER BY created_at DESC
             LIMIT $2
             "#,
@@ -172,10 +175,42 @@ impl MemoryRepository for PostgresMemoryRepository {
         rows.into_iter().map(row_to_memory).collect()
     }
 
+    async fn find_by_status(
+        &self,
+        status: MemoryStatus,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, memory_type, content_text, content_hash, summary,
+                   project, agent, importance, confidence, utility,
+                   status, version, provenance, metadata, created_at,
+                   updated_at, last_retrieved_at, embedding
+            FROM memories
+            WHERE status = $1
+            ORDER BY created_at ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(memory_status_to_str(status))
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!(
+                "Error al buscar memorias por estado {:?}: {e}",
+                status
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_memory).collect()
+    }
+
     async fn update(&self, memory: &Memory) -> Result<(), DomainError> {
         let provenance_json = serde_json::to_value(&memory.source).map_err(|e| {
             DomainError::RepositoryError(format!("Error al serializar provenance: {e}"))
         })?;
+        let pg_vector = memory.embedding.as_ref().map(|v| Vector::from(v.clone()));
 
         let result = sqlx::query(
             r#"
@@ -193,7 +228,8 @@ impl MemoryRepository for PostgresMemoryRepository {
                 version = $12,
                 provenance = $13,
                 updated_at = $14,
-                last_retrieved_at = $15
+                last_retrieved_at = $15,
+                embedding = $16
             WHERE id = $1
             "#,
         )
@@ -212,6 +248,7 @@ impl MemoryRepository for PostgresMemoryRepository {
         .bind(provenance_json)
         .bind(memory.updated_at)
         .bind(memory.last_retrieved_at)
+        .bind(pg_vector)
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -261,6 +298,74 @@ impl MemoryRepository for PostgresMemoryRepository {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl VectorRepository for PostgresMemoryRepository {
+    async fn store_embedding(&self, id: &MemoryId, embedding: &[f32]) -> Result<(), DomainError> {
+        let pg_vector = Vector::from(embedding.to_vec());
+        let result = sqlx::query(
+            r#"
+            UPDATE memories
+            SET embedding = $1, updated_at = NOW()
+            WHERE id = $2
+            "#,
+        )
+        .bind(pg_vector)
+        .bind(id.as_uuid())
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!(
+                "Error al almacenar embedding para memoria {id}: {e}"
+            ))
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::RepositoryError(format!(
+                "No se pudo guardar embedding: memoria {id} no encontrada"
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn search_similar(
+        &self,
+        embedding: &[f32],
+        limit: usize,
+    ) -> Result<Vec<(MemoryId, f32)>, DomainError> {
+        let pg_vector = Vector::from(embedding.to_vec());
+        let rows = sqlx::query(
+            r#"
+            SELECT id, (1.0 - (embedding <=> $1)) AS similarity
+            FROM memories
+            WHERE status = 'active' AND embedding IS NOT NULL
+            ORDER BY embedding <=> $1 ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(pg_vector)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!("Error en búsqueda vectorial similar: {e}"))
+        })?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: uuid::Uuid = row
+                .try_get("id")
+                .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+            let similarity: f64 = row
+                .try_get("similarity")
+                .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+            results.push((MemoryId::from_uuid(id), similarity as f32));
+        }
+
+        Ok(results)
     }
 }
 
@@ -393,6 +498,10 @@ fn row_to_memory(row: sqlx::postgres::PgRow) -> Result<Memory, DomainError> {
         last_retrieved_at,
         status,
         version: Version::new(version as u32)?,
-        embedding: None,
+        embedding: row
+            .try_get::<Option<Vector>, _>("embedding")
+            .ok()
+            .flatten()
+            .map(|v| v.to_vec()),
     })
 }

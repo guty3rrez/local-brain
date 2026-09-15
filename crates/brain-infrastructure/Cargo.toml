@@ -18,10 +18,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+pgvector = { workspace = true }
+reqwest = { workspace = true }
 
 [dev-dependencies]
 cucumber = { workspace = true }
 tokio = { workspace = true }
+wiremock = { workspace = true }
 
 [[test]]
 name = "cucumber"

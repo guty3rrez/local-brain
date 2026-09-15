@@ -1,11 +1,13 @@
-//! Runner de BDD Cucumber en Rust para pruebas de persistencia de memoria (SRS §25).
+//! Runner de BDD Cucumber en Rust para pruebas de persistencia de memoria y búsqueda vectorial (SRS §25).
 
 use cucumber::{given, then, when, World};
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
-use brain_domain::model::{Memory, MemoryContent, MemoryOrigin, MemoryStatus, Provenance};
-use brain_domain::ports::MemoryRepository;
+use brain_domain::model::{
+    Memory, MemoryContent, MemoryId, MemoryOrigin, MemoryStatus, Provenance,
+};
+use brain_domain::ports::{MemoryRepository, VectorRepository, DEFAULT_EMBEDDING_DIMENSION};
 use brain_infrastructure::persistence::PostgresMemoryRepository;
 
 #[derive(Debug, Default, World)]
@@ -13,6 +15,8 @@ pub struct MemoryWorld {
     repo: Option<PostgresMemoryRepository>,
     saved_memory: Option<Memory>,
     retrieved_memory: Option<Memory>,
+    indexed_vector: Option<Vec<f32>>,
+    search_results: Option<Vec<(MemoryId, f32)>>,
 }
 
 #[given(expr = "un repositorio PostgreSQL conectado y con migraciones aplicadas")]
@@ -87,6 +91,84 @@ async fn then_status_matches(world: &mut MemoryWorld, expected_status: String) {
         other => panic!("Estado no reconocido: {other}"),
     };
     assert_eq!(retrieved.status, expected);
+}
+
+// Pasos para Búsqueda Semántica Vectorial (semantic_recall.feature)
+
+#[given(expr = "un recuerdo indexado con embedding de 768 dimensiones y contenido {string}")]
+async fn given_indexed_memory_with_embedding(world: &mut MemoryWorld, content_str: String) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let content = MemoryContent::new(content_str).expect("Contenido válido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let mut memory = Memory::new_episodic(content, prov, Some("bdd-semantic".to_string()));
+
+    let mut vector = vec![0.0f32; DEFAULT_EMBEDDING_DIMENSION];
+    vector[42] = 1.0; // Vector unitario en dimensión 42
+    memory.embedding = Some(vector.clone());
+
+    repo.save(&memory)
+        .await
+        .expect("Debe guardar memoria con embedding");
+
+    world.saved_memory = Some(memory);
+    world.indexed_vector = Some(vector);
+}
+
+#[when(expr = "realizo una búsqueda vectorial con un vector de consulta similar")]
+async fn when_vector_search(world: &mut MemoryWorld) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let query_vector = world.indexed_vector.as_ref().expect("Vector no disponible");
+
+    let results = repo
+        .search_similar(query_vector, 5)
+        .await
+        .expect("Debe ejecutar búsqueda similar");
+
+    world.search_results = Some(results);
+}
+
+#[then(expr = "el resultado más similar contiene {string}")]
+async fn then_top_result_contains(world: &mut MemoryWorld, expected_text: String) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let results = world
+        .search_results
+        .as_ref()
+        .expect("Sin resultados de búsqueda");
+
+    assert!(
+        !results.is_empty(),
+        "La búsqueda vectorial debe retornar al menos un resultado"
+    );
+    let (top_id, _) = &results[0];
+
+    let memory = repo
+        .find_by_id(top_id)
+        .await
+        .expect("Error al buscar memoria")
+        .expect("Memoria top debe existir");
+
+    assert!(
+        memory.content.text().contains(&expected_text),
+        "El contenido '{}' debe contener '{}'",
+        memory.content.text(),
+        expected_text
+    );
+}
+
+#[then(expr = "la similitud coseno calculada es superior a {float}")]
+async fn then_similarity_above(world: &mut MemoryWorld, threshold: f32) {
+    let results = world
+        .search_results
+        .as_ref()
+        .expect("Sin resultados de búsqueda");
+    assert!(!results.is_empty());
+    let (_, score) = &results[0];
+    assert!(
+        *score > threshold,
+        "Similitud coseno {} debe ser mayor a {}",
+        score,
+        threshold
+    );
 }
 
 #[tokio::main]

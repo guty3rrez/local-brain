@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use thiserror::Error;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use brain_domain::model::{
-    Confidence, DomainError, Importance, Memory, MemoryContent, MemoryId, MemoryOrigin, MemoryType,
-    Provenance,
+    Confidence, DomainError, Importance, Memory, MemoryContent, MemoryId, MemoryOrigin,
+    MemoryStatus, MemoryType, Provenance,
 };
-use brain_domain::ports::MemoryRepository;
+use brain_domain::ports::{EmbeddingProvider, MemoryRepository, VectorRepository};
 
 /// Errores derivados de la orquestación y casos de uso.
 #[derive(Debug, Error, PartialEq)]
@@ -94,15 +94,33 @@ impl RememberCommand {
     }
 }
 
-/// Caso de Uso: Registrar y persistir un nuevo recuerdo cognitivo.
+/// Caso de Uso: Registrar y persistir un nuevo recuerdo cognitivo (SRS §8, §9, §12.3).
 #[derive(Clone)]
 pub struct RememberUseCase {
     repository: Arc<dyn MemoryRepository>,
+    embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    vector_repository: Option<Arc<dyn VectorRepository>>,
 }
 
 impl RememberUseCase {
     pub fn new(repository: Arc<dyn MemoryRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            embedding_provider: None,
+            vector_repository: None,
+        }
+    }
+
+    pub fn with_embedding(
+        repository: Arc<dyn MemoryRepository>,
+        embedding_provider: Arc<dyn EmbeddingProvider>,
+        vector_repository: Arc<dyn VectorRepository>,
+    ) -> Self {
+        Self {
+            repository,
+            embedding_provider: Some(embedding_provider),
+            vector_repository: Some(vector_repository),
+        }
     }
 
     #[instrument(skip(self, cmd), fields(project = ?cmd.project, mem_type = ?cmd.memory_type))]
@@ -132,19 +150,56 @@ impl RememberUseCase {
             memory.confidence = Confidence::new(conf_val)?;
         }
 
-        self.repository.save(&memory).await?;
-        info!(memory_id = %memory.id, "Nuevo recuerdo persistido exitosamente");
+        // Generación de embedding y persistencia con fallback asíncrono (SRS §12.3)
+        if let (Some(provider), Some(vector_repo)) =
+            (&self.embedding_provider, &self.vector_repository)
+        {
+            match provider.embed(memory.content.text()).await {
+                Ok(vector) => {
+                    memory.embedding = Some(vector.clone());
+                    self.repository.save(&memory).await?;
+                    if let Err(e) = vector_repo.store_embedding(&memory.id, &vector).await {
+                        warn!(
+                            memory_id = %memory.id,
+                            error = %e,
+                            "No se pudo indexar vector; memoria queda en pending_embedding"
+                        );
+                        memory.status = MemoryStatus::PendingEmbedding;
+                        let _ = self.repository.update(&memory).await;
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        memory_id = %memory.id,
+                        error = %e,
+                        "Servicio de embeddings no disponible; guardando con pending_embedding (SRS §12.3)"
+                    );
+                    memory.status = MemoryStatus::PendingEmbedding;
+                    self.repository.save(&memory).await?;
+                }
+            }
+        } else {
+            self.repository.save(&memory).await?;
+        }
+
+        info!(
+            memory_id = %memory.id,
+            status = ?memory.status,
+            "Nuevo recuerdo persistido exitosamente"
+        );
 
         Ok(memory)
     }
 }
 
-/// Parámetros de consulta para recuperar recuerdos.
+/// Parámetros de consulta para recuperar recuerdos (SRS §13).
 #[derive(Debug, Clone, Default)]
 pub struct RecallQuery {
     pub id: Option<MemoryId>,
     pub project: Option<String>,
     pub memory_type: Option<MemoryType>,
+    pub query: Option<String>,
+    pub min_similarity: Option<f32>,
     pub limit: Option<usize>,
 }
 
@@ -163,8 +218,25 @@ impl RecallQuery {
         }
     }
 
+    pub fn by_query(query: impl Into<String>) -> Self {
+        Self {
+            query: Some(query.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_query(mut self, query: impl Into<String>) -> Self {
+        self.query = Some(query.into());
+        self
+    }
+
     pub fn with_type(mut self, mem_type: MemoryType) -> Self {
         self.memory_type = Some(mem_type);
+        self
+    }
+
+    pub fn with_min_similarity(mut self, min_sim: f32) -> Self {
+        self.min_similarity = Some(min_sim);
         self
     }
 
@@ -174,15 +246,33 @@ impl RecallQuery {
     }
 }
 
-/// Caso de Uso: Recuperar recuerdos por ID o criterios de filtrado.
+/// Caso de Uso: Recuperar recuerdos por ID, criterios de filtrado o búsqueda semántica vectorial (SRS §13, §25.2).
 #[derive(Clone)]
 pub struct RecallUseCase {
     repository: Arc<dyn MemoryRepository>,
+    embedding_provider: Option<Arc<dyn EmbeddingProvider>>,
+    vector_repository: Option<Arc<dyn VectorRepository>>,
 }
 
 impl RecallUseCase {
     pub fn new(repository: Arc<dyn MemoryRepository>) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            embedding_provider: None,
+            vector_repository: None,
+        }
+    }
+
+    pub fn with_embedding(
+        repository: Arc<dyn MemoryRepository>,
+        embedding_provider: Arc<dyn EmbeddingProvider>,
+        vector_repository: Arc<dyn VectorRepository>,
+    ) -> Self {
+        Self {
+            repository,
+            embedding_provider: Some(embedding_provider),
+            vector_repository: Some(vector_repository),
+        }
     }
 
     #[instrument(skip(self))]
@@ -199,6 +289,47 @@ impl RecallUseCase {
                 }
                 _ => Err(ApplicationError::NotFound(id)),
             }
+        } else if let Some(ref text_query) = query.query {
+            let (provider, vector_repo) = match (&self.embedding_provider, &self.vector_repository)
+            {
+                (Some(p), Some(v)) => (p, v),
+                _ => {
+                    return Err(ApplicationError::InvalidQuery(
+                        "Búsqueda semántica no configurada: falta proveedor de embeddings o repositorio vectorial".into(),
+                    ));
+                }
+            };
+
+            let query_vec = provider.embed(text_query).await?;
+            let similar_pairs = vector_repo.search_similar(&query_vec, limit).await?;
+
+            let mut memories = Vec::new();
+            for (id, similarity) in similar_pairs {
+                if let Some(min_sim) = query.min_similarity {
+                    if similarity < min_sim {
+                        continue;
+                    }
+                }
+                if let Some(mut mem) = self.repository.find_by_id(&id).await? {
+                    if !mem.is_active() {
+                        continue;
+                    }
+                    if let Some(ref proj) = query.project {
+                        if mem.project.as_deref() != Some(proj) {
+                            continue;
+                        }
+                    }
+                    if let Some(mtype) = query.memory_type {
+                        if mem.memory_type != mtype {
+                            continue;
+                        }
+                    }
+                    mem.mark_retrieved();
+                    let _ = self.repository.update(&mem).await;
+                    memories.push(mem);
+                }
+            }
+            Ok(memories)
         } else if let Some(ref project) = query.project {
             let mut memories = self.repository.find_by_project(project, limit).await?;
             if let Some(mtype) = query.memory_type {
@@ -218,9 +349,67 @@ impl RecallUseCase {
             Ok(memories)
         } else {
             Err(ApplicationError::InvalidQuery(
-                "Debe especificarse al menos un ID, proyecto o tipo de memoria para recall".into(),
+                "Debe especificarse al menos un ID, texto de consulta (query), proyecto o tipo de memoria para recall".into(),
             ))
         }
+    }
+}
+
+/// Caso de Uso: Procesar recuerdos pendientes de computar su vector de embedding (SRS §12.3).
+#[derive(Clone)]
+pub struct EmbedPendingUseCase {
+    memory_repository: Arc<dyn MemoryRepository>,
+    embedding_provider: Arc<dyn EmbeddingProvider>,
+    vector_repository: Arc<dyn VectorRepository>,
+}
+
+impl EmbedPendingUseCase {
+    pub fn new(
+        memory_repository: Arc<dyn MemoryRepository>,
+        embedding_provider: Arc<dyn EmbeddingProvider>,
+        vector_repository: Arc<dyn VectorRepository>,
+    ) -> Self {
+        Self {
+            memory_repository,
+            embedding_provider,
+            vector_repository,
+        }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn execute(&self, limit: usize) -> Result<usize, ApplicationError> {
+        let pending = self
+            .memory_repository
+            .find_by_status(MemoryStatus::PendingEmbedding, limit)
+            .await?;
+        let mut processed = 0;
+
+        for mut memory in pending {
+            match self.embedding_provider.embed(memory.content.text()).await {
+                Ok(vector) => {
+                    self.vector_repository
+                        .store_embedding(&memory.id, &vector)
+                        .await?;
+                    memory.status = MemoryStatus::Active;
+                    memory.embedding = Some(vector);
+                    self.memory_repository.update(&memory).await?;
+                    processed += 1;
+                    info!(
+                        memory_id = %memory.id,
+                        "Embedding generado exitosamente para memoria pendiente"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        memory_id = %memory.id,
+                        error = %e,
+                        "Fallo al generar embedding para memoria pendiente; continúa en PendingEmbedding"
+                    );
+                }
+            }
+        }
+
+        Ok(processed)
     }
 }
 
@@ -303,5 +492,106 @@ mod tests {
         let result = recall_uc.execute(query).await;
 
         assert_eq!(result, Err(ApplicationError::NotFound(random_id)));
+    }
+
+    #[tokio::test]
+    async fn remember_and_semantic_recall() {
+        use brain_domain::ports::{InMemoryEmbeddingProvider, InMemoryVectorRepository};
+
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let emb_provider = Arc::new(InMemoryEmbeddingProvider::new());
+        let vec_repo = Arc::new(InMemoryVectorRepository::new());
+
+        let remember_uc = RememberUseCase::with_embedding(
+            mem_repo.clone(),
+            emb_provider.clone(),
+            vec_repo.clone(),
+        );
+        let recall_uc =
+            RecallUseCase::with_embedding(mem_repo.clone(), emb_provider.clone(), vec_repo.clone());
+
+        let cmd1 = RememberCommand::new("Arquitectura Hexagonal desacopla el núcleo")
+            .with_project("local-brain");
+        let cmd2 = RememberCommand::new("PostgreSQL 17 con extensión pgvector")
+            .with_project("local-brain");
+
+        let m1 = remember_uc.execute(cmd1).await.unwrap();
+        let m2 = remember_uc.execute(cmd2).await.unwrap();
+
+        assert_eq!(m1.status, MemoryStatus::Active);
+        assert_eq!(m2.status, MemoryStatus::Active);
+        assert!(m1.embedding.is_some());
+        assert_eq!(vec_repo.count(), 2);
+
+        // Recall semántico por query
+        let query = RecallQuery::by_query("Hexagonal y desacople").with_limit(5);
+        let results = recall_uc.execute(query).await.unwrap();
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].id, m1.id);
+    }
+
+    struct FailingEmbeddingProvider;
+
+    #[async_trait::async_trait]
+    impl EmbeddingProvider for FailingEmbeddingProvider {
+        async fn embed(&self, _text: &str) -> Result<Vec<f32>, DomainError> {
+            Err(DomainError::RepositoryError("Runtime offline".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn remember_fallback_to_pending_when_embedding_fails() {
+        use brain_domain::ports::InMemoryVectorRepository;
+
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let failing_provider = Arc::new(FailingEmbeddingProvider);
+        let vec_repo = Arc::new(InMemoryVectorRepository::new());
+
+        let remember_uc =
+            RememberUseCase::with_embedding(mem_repo.clone(), failing_provider, vec_repo.clone());
+
+        let cmd = RememberCommand::new("Memoria cuando el servicio de embeddings está caído")
+            .with_project("local-brain");
+
+        // SRS §12.3: No debe fallar; se guarda con status PendingEmbedding
+        let memory = remember_uc
+            .execute(cmd)
+            .await
+            .expect("Debe guardar la memoria a pesar del fallo de embedding");
+
+        assert_eq!(memory.status, MemoryStatus::PendingEmbedding);
+        assert!(memory.embedding.is_none());
+        assert_eq!(vec_repo.count(), 0);
+
+        let saved = mem_repo.find_by_id(&memory.id).await.unwrap().unwrap();
+        assert_eq!(saved.status, MemoryStatus::PendingEmbedding);
+    }
+
+    #[tokio::test]
+    async fn embed_pending_processes_pending_memories() {
+        use brain_domain::ports::{InMemoryEmbeddingProvider, InMemoryVectorRepository};
+
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let provider = Arc::new(InMemoryEmbeddingProvider::new());
+        let vec_repo = Arc::new(InMemoryVectorRepository::new());
+
+        // Guardar directamente una memoria en estado PendingEmbedding
+        let content = MemoryContent::new("Memoria pendiente para indexar").unwrap();
+        let prov = Provenance::new(MemoryOrigin::Observation);
+        let mut memory = Memory::new_episodic(content, prov, Some("local-brain".to_string()));
+        memory.status = MemoryStatus::PendingEmbedding;
+        mem_repo.save(&memory).await.unwrap();
+
+        let embed_pending_uc =
+            EmbedPendingUseCase::new(mem_repo.clone(), provider.clone(), vec_repo.clone());
+
+        let processed = embed_pending_uc.execute(10).await.unwrap();
+        assert_eq!(processed, 1);
+        assert_eq!(vec_repo.count(), 1);
+
+        let updated = mem_repo.find_by_id(&memory.id).await.unwrap().unwrap();
+        assert_eq!(updated.status, MemoryStatus::Active);
+        assert!(updated.embedding.is_some());
     }
 }
