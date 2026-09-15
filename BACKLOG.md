@@ -13,8 +13,8 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | Fase | Nombre | Estado | Progreso | Cobertura de Tests |
 | :--- | :--- | :---: | :---: | :---: |
 | **Fase 0** | Foundation & Governance | 🟢 Completado | `[██████████] 100%` | Baseline CI / Lints / ADRs |
-| **Fase 1** | Memory Core (MVP Parte 1) | 🟡 En Progreso | `[████░░░░░░] 40%` | Dominio Puro + Casos de Uso |
-| **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
+| **Fase 1** | Memory Core (MVP Parte 1) | 🟢 Completado | `[██████████] 100%` | Dominio Puro + Casos de Uso + Persistencia + CLI |
+| **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | 🟡 En Progreso | `[░░░░░░░░░░] 0%` | Integration + BDD |
 | **Fase 3** | MCP Server (MVP Parte 3) | ⚪ Planificado | `[░░░░░░░░░░] 0%` | E2E + BDD + Security |
 | **Fase 4** | Memory Types Specialization | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Mutation |
 | **Fase 5** | Knowledge Graph & Relations | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Integration |
@@ -144,7 +144,7 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 - [x] **[F1-04] Casos de Uso de Aplicación: Remember y Recall Directo** `P0`
   - **Descripción**: Implementar `RememberUseCase` y `RecallUseCase` (recuperación por metadata y texto plano) en `brain-application`.
   - **Arsenal**: *Unit*: Suite completa de pruebas con `InMemoryMemoryRepository`.
-- [ ] **[F1-05] CLI Básica: `brain init`, `brain remember`, `brain recall`, `brain status`** `P1`
+- [x] **[F1-05] CLI Básica: `brain init`, `brain remember`, `brain recall`, `brain status`** `P1`
   - **Descripción**: Interfaz de línea de comandos en `brain-cli` con `clap`.
   - **Arsenal**: *Integration*: Tests de caja negra invocando los binarios con `assert_cmd`.
 
