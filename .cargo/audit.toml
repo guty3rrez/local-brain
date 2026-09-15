@@ -1,0 +1,13 @@
+# Configuración de cargo-audit para Local Brain (SRS §30, §40)
+# https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: Timing sidechannel in PKCS#1 v1.5 decryption (Marvin Attack) en crate `rsa`.
+    # Justificación técnica:
+    # 1. Dependencia transitiva arrastrada en tiempo de compilación por `sqlx-macros` -> `sqlx-mysql`.
+    # 2. Local Brain utiliza exclusivamente PostgreSQL + pgvector; `sqlx-mysql` nunca se ejecuta ni conecta en runtime.
+    # 3. Local Brain no utiliza claves privadas RSA ni realiza operaciones de descifrado PKCS#1 v1.5 sobre la red.
+    # 4. El crate upstream `rsa` no posee parche correctivo publicado. El riesgo es nulo/no explotable en Local Brain.
+    "RUSTSEC-2023-0071",
+]

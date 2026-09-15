@@ -7,6 +7,9 @@ vulnerability = "deny"
 unmaintained = "warn"
 yanked = "warn"
 notice = "warn"
+ignore = [
+    "RUSTSEC-2023-0071", # Marvin Attack en rsa (dependencia transitiva de compile-time de sqlx-macros; no usada en runtime)
+]
 
 [licenses]
 version = 2
