@@ -19,8 +19,14 @@ pub enum ApplicationError {
     #[error("Error de dominio: {0}")]
     Domain(#[from] DomainError),
 
+    #[error("Error de grafo: {0}")]
+    Graph(#[from] brain_graph::GraphError),
+
     #[error("Recuerdo con ID {0} no encontrado")]
     NotFound(MemoryId),
+
+    #[error("Elemento no encontrado: {0}")]
+    NotFoundString(String),
 
     #[error("Parámetros de consulta inválidos: {0}")]
     InvalidQuery(String),

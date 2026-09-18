@@ -9,6 +9,7 @@ authors.workspace = true
 brain-core = { path = "../brain-core" }
 brain-domain = { path = "../brain-domain" }
 brain-application = { path = "../brain-application" }
+brain-graph = { path = "../brain-graph" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }

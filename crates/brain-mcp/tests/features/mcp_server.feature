@@ -26,3 +26,10 @@ Característica: Servidor Model Context Protocol (MCP) para interacción con age
     Dado un servidor MCP activo con política de seguridad completa
     Cuando el agente intenta eliminar un recuerdo sin el flag confirm
     Entonces la operación es rechazada requiriendo confirmación explícita
+
+  Escenario: Agente vincula conceptos y navega el grafo mediante herramientas MCP
+    Dado un servidor MCP activo con política de seguridad completa
+    Cuando el agente ejecuta la herramienta "brain_relate" conectando "Rust" con "PostgreSQL" mediante "USED_IN"
+    Entonces la respuesta confirma que la relación fue establecida
+    Cuando el agente explora el grafo para "Rust" mediante la herramienta "brain_graph"
+    Entonces la respuesta contiene el nodo "PostgreSQL" con protección de contexto

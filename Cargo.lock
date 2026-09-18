@@ -176,12 +176,15 @@ dependencies = [
  "async-trait",
  "brain-core",
  "brain-domain",
+ "brain-graph",
  "chrono",
  "rstest",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -192,6 +195,7 @@ dependencies = [
  "brain-application",
  "brain-core",
  "brain-domain",
+ "brain-graph",
  "brain-infrastructure",
  "brain-mcp",
  "clap",
@@ -229,6 +233,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "brain-graph"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "brain-core",
+ "brain-domain",
+ "chrono",
+ "rstest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "brain-infrastructure"
 version = "0.1.0"
 dependencies = [
@@ -236,6 +257,7 @@ dependencies = [
  "brain-application",
  "brain-core",
  "brain-domain",
+ "brain-graph",
  "chrono",
  "cucumber",
  "pgvector",
@@ -258,6 +280,7 @@ dependencies = [
  "brain-application",
  "brain-core",
  "brain-domain",
+ "brain-graph",
  "chrono",
  "cucumber",
  "rstest",

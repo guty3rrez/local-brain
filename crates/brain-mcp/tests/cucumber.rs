@@ -3,8 +3,11 @@
 use cucumber::{given, then, when, World};
 use std::sync::Arc;
 
-use brain_application::{ForgetUseCase, RecallUseCase, RememberUseCase};
+use brain_application::{
+    ForgetUseCase, RecallUseCase, RelateUseCase, RememberUseCase, TraverseGraphUseCase,
+};
 use brain_domain::ports::InMemoryMemoryRepository;
+use brain_graph::InMemoryGraphRepository;
 use brain_mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
 use brain_mcp::security::McpSecurityPolicy;
 use brain_mcp::server::McpServer;
@@ -33,12 +36,18 @@ async fn given_mcp_server(world: &mut McpWorld) {
     let recall_uc = Arc::new(RecallUseCase::new(repo.clone()));
     let forget_uc = Arc::new(ForgetUseCase::new(repo.clone()));
 
+    let graph_repo = Arc::new(InMemoryGraphRepository::new());
+    let relate_uc =
+        Arc::new(RelateUseCase::new(graph_repo.clone()).with_memory_repository(repo.clone()));
+    let traverse_uc = Arc::new(TraverseGraphUseCase::new(graph_repo));
+
     let server = McpServer::new(
         remember_uc,
         recall_uc,
         forget_uc,
         McpSecurityPolicy::new_full(),
-    );
+    )
+    .with_graph(relate_uc, traverse_uc);
     world.server = Some(server);
 }
 
@@ -223,6 +232,69 @@ async fn then_forget_rejected(world: &mut McpWorld) {
     assert_eq!(result["isError"], true);
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("confirm"));
+}
+
+#[when(
+    expr = "el agente ejecuta la herramienta {string} conectando {string} con {string} mediante {string}"
+)]
+async fn when_agent_calls_relate(
+    world: &mut McpWorld,
+    tool_name: String,
+    source: String,
+    target: String,
+    relation: String,
+) {
+    let server = world.server.as_ref().expect("Servidor MCP no inicializado");
+    let req = JsonRpcRequest::new("tools/call", Some(serde_json::json!(10))).with_params(
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": {
+                "source": source,
+                "target": target,
+                "relation": relation,
+                "weight": 0.95
+            }
+        }),
+    );
+    world.last_response = server.handle_request(req).await;
+}
+
+#[then(expr = "la respuesta confirma que la relación fue establecida")]
+async fn then_relate_confirmed(world: &mut McpWorld) {
+    let resp = world.last_response.as_ref().expect("Sin respuesta previa");
+    let result = resp.result.as_ref().expect("Resultado esperado");
+    let is_error = result
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    assert!(!is_error, "Se esperaba resultado exitoso");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Relación establecida"));
+}
+
+#[when(expr = "el agente explora el grafo para {string} mediante la herramienta {string}")]
+async fn when_agent_calls_graph(world: &mut McpWorld, node: String, tool_name: String) {
+    let server = world.server.as_ref().expect("Servidor MCP no inicializado");
+    let req = JsonRpcRequest::new("tools/call", Some(serde_json::json!(11))).with_params(
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": {
+                "node": node,
+                "depth": 1
+            }
+        }),
+    );
+    world.last_response = server.handle_request(req).await;
+}
+
+#[then(expr = "la respuesta contiene el nodo {string} con protección de contexto")]
+async fn then_graph_response_protected(world: &mut McpWorld, node_name: String) {
+    let resp = world.last_response.as_ref().expect("Sin respuesta previa");
+    let result = resp.result.as_ref().expect("Resultado esperado");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains(&node_name));
+    assert!(text.contains("<untrusted_graph_context>"));
+    assert!(text.contains("</untrusted_graph_context>"));
 }
 
 #[tokio::main]

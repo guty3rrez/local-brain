@@ -15,11 +15,13 @@ brain-domain = { path = "../brain-domain" }
 brain-application = { path = "../brain-application" }
 brain-infrastructure = { path = "../brain-infrastructure" }
 brain-mcp = { path = "../brain-mcp" }
+brain-graph = { path = "../brain-graph" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 sqlx = { workspace = true }
 reqwest = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

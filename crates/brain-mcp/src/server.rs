@@ -4,7 +4,10 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tracing::{debug, info};
 
-use brain_application::{ExpireSessionUseCase, ForgetUseCase, RecallUseCase, RememberUseCase};
+use brain_application::{
+    ExpireSessionUseCase, ForgetUseCase, RecallUseCase, RelateUseCase, RememberUseCase,
+    TraverseGraphUseCase,
+};
 use brain_core::CORE_VERSION;
 
 use crate::protocol::{
@@ -13,8 +16,8 @@ use crate::protocol::{
 };
 use crate::security::McpSecurityPolicy;
 use crate::tools::{
-    execute_forget, execute_recall, execute_remember, execute_search, execute_session_end,
-    list_tools,
+    execute_forget, execute_graph, execute_recall, execute_relate, execute_remember,
+    execute_search, execute_session_end, list_tools,
 };
 
 /// Servidor MCP de Local Brain.
@@ -24,6 +27,8 @@ pub struct McpServer {
     recall_uc: Arc<RecallUseCase>,
     forget_uc: Arc<ForgetUseCase>,
     expire_session_uc: Option<Arc<ExpireSessionUseCase>>,
+    relate_uc: Option<Arc<RelateUseCase>>,
+    traverse_uc: Option<Arc<TraverseGraphUseCase>>,
     security: McpSecurityPolicy,
 }
 
@@ -40,6 +45,8 @@ impl McpServer {
             recall_uc,
             forget_uc,
             expire_session_uc: None,
+            relate_uc: None,
+            traverse_uc: None,
             security,
         }
     }
@@ -47,6 +54,17 @@ impl McpServer {
     /// Adjunta el caso de uso para expiración de sesiones (SRS §10.1, §21.4).
     pub fn with_expire_session_uc(mut self, expire_session_uc: Arc<ExpireSessionUseCase>) -> Self {
         self.expire_session_uc = Some(expire_session_uc);
+        self
+    }
+
+    /// Adjunta los casos de uso para operaciones en el Grafo de Conocimiento (SRS §11, §21.1, F5-03).
+    pub fn with_graph(
+        mut self,
+        relate_uc: Arc<RelateUseCase>,
+        traverse_uc: Arc<TraverseGraphUseCase>,
+    ) -> Self {
+        self.relate_uc = Some(relate_uc);
+        self.traverse_uc = Some(traverse_uc);
         self
     }
 
@@ -132,6 +150,12 @@ impl McpServer {
                             &self.security,
                         )
                         .await
+                    }
+                    "brain_relate" => {
+                        execute_relate(arguments, self.relate_uc.clone(), &self.security).await
+                    }
+                    "brain_graph" => {
+                        execute_graph(arguments, self.traverse_uc.clone(), &self.security).await
                     }
                     _ => {
                         return Some(JsonRpcResponse::error(

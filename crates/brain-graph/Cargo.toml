@@ -1,5 +1,5 @@
 [package]
-name = "brain-mcp"
+name = "brain-graph"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,21 +8,14 @@ authors.workspace = true
 [dependencies]
 brain-core = { path = "../brain-core" }
 brain-domain = { path = "../brain-domain" }
-brain-application = { path = "../brain-application" }
-brain-graph = { path = "../brain-graph" }
+thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tokio = { workspace = true }
-chrono = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
 async-trait = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 rstest = { workspace = true }
-cucumber = { workspace = true }
-
-[[test]]
-name = "cucumber"
-harness = false
+tokio = { workspace = true }

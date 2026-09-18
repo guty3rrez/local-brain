@@ -8,8 +8,11 @@ authors.workspace = true
 [dependencies]
 brain-core = { path = "../brain-core" }
 brain-domain = { path = "../brain-domain" }
+brain-graph = { path = "../brain-graph" }
 thiserror = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }

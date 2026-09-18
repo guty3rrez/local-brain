@@ -17,7 +17,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | 🟢 Completado | `[██████████] 100%` | Integration + BDD + Wiremock + pgvector |
 | **Fase 3** | MCP Server (MVP Parte 3) | 🟢 Completado | `[██████████] 100%` | E2E + BDD + Security |
 | **Fase 4** | Memory Types Specialization | 🟢 Completado | `[██████████] 100%` | Unit + Integration + BDD + MCP + CLI |
-| **Fase 5** | Knowledge Graph & Relations | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Integration |
+| **Fase 5** | Knowledge Graph & Relations | 🟢 Completado | `[██████████] 100%` | Pure Domain + PostgreSQL CTEs + Stress 1k + MCP Tools + CLI + BDD |
 | **Fase 6** | Learning & Candidate Knowledge | ⚪ Planificado | `[░░░░░░░░░░] 0%` | BDD + Mutation |
 | **Fase 7** | Consolidation & Reflection | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
 | **Fase 8** | Advanced Hybrid Retrieval & Scoring | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Benchmarks + Unit |
@@ -217,17 +217,21 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 5 — Knowledge Graph & Relaciones (SRS §11, §68)
 *Objetivo: Grafo de conocimiento persistente con relaciones conceptuales y traversal.*
 
-- [ ] **[F5-01] Entidades y Relaciones Tipadas de Grafo** `P1`
+- [x] **[F5-01] Entidades y Relaciones Tipadas de Grafo** `P1`
   - **Descripción**: Crate `brain-graph`. Tipos de relación: `RELATED_TO`, `USED_IN`, `CAUSED_BY`, `SOLVES`, `CONTRADICTS`, `SUPERSEDES`, `DERIVED_FROM`, `DEPENDS_ON`, `PREFERS`, `AVOID`.
   - **Arsenal**:
-    - *Unit*: Integridad referencial en memoria, prevención de ciclos inválidos.
+    - *Unit*: Integridad referencial en memoria, prevención de ciclos inválidos en DAGs, auto-bucles rechazados.
     - *Mutation*: Evaluación de reglas de transición de aristas.
-- [ ] **[F5-02] Persistencia de Grafo en PostgreSQL (Adjacency / CTEs)** `P1`
-  - **Descripción**: Almacenar nodos y aristas en PostgreSQL con soporte para consultas recursivas (Recursive CTEs) para traversal hasta N niveles.
-  - **Arsenal**: *Integration*: Pruebas de traversal con grafos de prueba de 1.000 nodos.
-- [ ] **[F5-03] Tool MCP `brain_relate` y Expansión de Grafo** `P1`
-  - **Descripción**: Permitir a los agentes conectar recuerdos y consultar vecindades de conceptos.
-  - **Arsenal**: *BDD* ("Agent links Decision A to Decision B as SUPERSEDES").
+- [x] **[F5-02] Persistencia de Grafo en PostgreSQL (Adjacency / CTEs)** `P1`
+  - **Descripción**: Almacenar nodos y aristas en PostgreSQL con soporte para consultas recursivas (Recursive CTEs) para traversal hasta N niveles y prevención de ciclos en SQL.
+  - **Arsenal**:
+    - *Integration*: Pruebas de traversal con grafos de prueba de 1.000 nodos (< 50ms).
+    - *BDD*: Escenario Gherkin "Knowledge Graph persistent storage and recursive CTE traversal".
+- [x] **[F5-03] Tool MCP `brain_relate` y Expansión de Grafo** `P1`
+  - **Descripción**: Permitir a los agentes conectar recuerdos y consultar vecindades de conceptos mediante herramientas MCP (`brain_relate`, `brain_graph`) y comandos CLI (`brain relate`, `brain graph`), con mitigación de prompt injection (`<untrusted_graph_context>`).
+  - **Arsenal**:
+    - *BDD*: Escenario "Agent connects and navigates Knowledge Graph relationships via MCP".
+    - *Integration*: Pruebas de CLI de caja negra y servidor MCP stdio.
 
 ---
 

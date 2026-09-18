@@ -15,7 +15,9 @@ fn cli_help_and_version() {
         .stdout(predicate::str::contains("remember"))
         .stdout(predicate::str::contains("recall"))
         .stdout(predicate::str::contains("init"))
-        .stdout(predicate::str::contains("status"));
+        .stdout(predicate::str::contains("status"))
+        .stdout(predicate::str::contains("relate"))
+        .stdout(predicate::str::contains("graph"));
 
     let mut ver_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
     ver_cmd
@@ -334,4 +336,121 @@ fn cli_purge_expired_command() {
         .stdout(predicate::str::contains(
             "Purga de recuerdos expirados completada exitosamente",
         ));
+}
+
+#[test]
+fn cli_relate_and_graph_in_memory() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let src = format!("concept-cli-a-{tag}");
+    let tgt = format!("concept-cli-b-{tag}");
+
+    // 1. Relate en modo efímero
+    let mut rel_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rel_cmd
+        .arg("--in-memory")
+        .arg("relate")
+        .arg(&src)
+        .arg(&tgt)
+        .arg("--type")
+        .arg("used-in")
+        .arg("--weight")
+        .arg("0.85")
+        .arg("--context")
+        .arg("Arquitectura modular")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Relación establecida exitosamente en el Knowledge Graph",
+        ))
+        .stdout(predicate::str::contains("USED_IN"))
+        .stdout(predicate::str::contains("0.85"));
+}
+
+#[test]
+fn cli_relate_and_graph_postgres_integration() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let src = format!("hexagonal-{tag}");
+    let tgt = format!("ports-and-adapters-{tag}");
+
+    // 1. Relate en PostgreSQL
+    let mut rel_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rel_cmd
+        .arg("relate")
+        .arg(&src)
+        .arg(&tgt)
+        .arg("--type")
+        .arg("related-to")
+        .arg("--weight")
+        .arg("0.95")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Relación establecida exitosamente en el Knowledge Graph",
+        ))
+        .stdout(predicate::str::contains("RELATED_TO"));
+
+    // 2. Graph exploration en texto legible
+    let mut graph_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    graph_cmd
+        .arg("graph")
+        .arg(&src)
+        .arg("--depth")
+        .arg("2")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Knowledge Graph — Subgrafo desde"))
+        .stdout(predicate::str::contains(&src))
+        .stdout(predicate::str::contains(&tgt));
+
+    // 3. Graph exploration en formato JSON
+    let mut json_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    json_cmd
+        .arg("graph")
+        .arg(&src)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"root\":"))
+        .stdout(predicate::str::contains("\"nodes\":"))
+        .stdout(predicate::str::contains("\"edges\":"));
+}
+
+#[test]
+fn cli_relate_self_loop_rejection() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("--in-memory")
+        .arg("relate")
+        .arg("SelfConcept")
+        .arg("SelfConcept")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("auto-bucle"));
+}
+
+#[test]
+fn cli_relate_dag_cycle_rejection() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let n1 = format!("dag-a-{tag}");
+    let n2 = format!("dag-b-{tag}");
+
+    // 1. n1 SUPERSEDES n2
+    let mut cmd1 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd1.arg("relate")
+        .arg(&n1)
+        .arg(&n2)
+        .arg("--type")
+        .arg("supersedes")
+        .assert()
+        .success();
+
+    // 2. n2 SUPERSEDES n1 (debe fallar por ciclo en DAG)
+    let mut cmd2 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd2.arg("relate")
+        .arg(&n2)
+        .arg(&n1)
+        .arg("--type")
+        .arg("supersedes")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Ciclo"));
 }

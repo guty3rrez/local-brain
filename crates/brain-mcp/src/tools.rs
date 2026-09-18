@@ -9,9 +9,11 @@ use tracing::{error, info, warn};
 
 use brain_application::{
     ApplicationError, ExpireSessionUseCase, ForgetUseCase, RecallQuery, RecallUseCase,
-    RememberCommand, RememberUseCase,
+    RelateCommand, RelateUseCase, RememberCommand, RememberUseCase, TraverseGraphQuery,
+    TraverseGraphUseCase,
 };
 use brain_domain::model::{MemoryId, MemoryType, ProcedureStep};
+use brain_graph::model::{RelationType, TraversalDirection};
 
 use crate::protocol::{ToolCallResult, ToolDefinition};
 use crate::security::{
@@ -239,6 +241,84 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["session_id"]
+            }),
+        },
+        ToolDefinition {
+            name: "brain_relate".to_string(),
+            description: "Establece una relación semántica tipada entre dos recuerdos o conceptos en el Grafo de Conocimiento (SRS §11, §21.1, F5-03). Soporta 10 tipos (RELATED_TO, USED_IN, CAUSED_BY, SOLVES, CONTRADICTS, SUPERSEDES, DERIVED_FROM, DEPENDS_ON, PREFERS, AVOID) con prevención determinista de ciclos.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "ID UUID de memoria o nombre del concepto origen."
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "ID UUID de memoria o nombre del concepto destino."
+                    },
+                    "relation": {
+                        "type": "string",
+                        "enum": [
+                            "RELATED_TO", "USED_IN", "CAUSED_BY", "SOLVES", "CONTRADICTS",
+                            "SUPERSEDES", "DERIVED_FROM", "DEPENDS_ON", "PREFERS", "AVOID"
+                        ],
+                        "description": "Tipo de relación semántica en el grafo."
+                    },
+                    "weight": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Fuerza o peso de la relación en [0.0, 1.0] (por defecto: 1.0)."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Justificación o contexto explicativo de la relación."
+                    }
+                },
+                "required": ["source", "target", "relation"]
+            }),
+        },
+        ToolDefinition {
+            name: "brain_graph".to_string(),
+            description: "Navega y consulta vecindades recursivas multi-salto en el Grafo de Conocimiento a partir de un recuerdo o concepto (SRS §11, §13.2, F5-03).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "node": {
+                        "type": "string",
+                        "description": "ID UUID de memoria o nombre de concepto a explorar."
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "Profundidad máxima en saltos de arista (1 a 5, por defecto: 1)."
+                    },
+                    "direction": {
+                        "type": "string",
+                        "enum": ["outbound", "inbound", "both"],
+                        "description": "Dirección de exploración de aristas (por defecto: 'both')."
+                    },
+                    "relation_types": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Filtrar exclusivamente por tipos de relación específicos."
+                    },
+                    "min_weight": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Umbral mínimo de peso de arista."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Cantidad máxima de nodos a retornar (por defecto: 20)."
+                    }
+                },
+                "required": ["node"]
             }),
         },
     ]
@@ -716,6 +796,183 @@ pub async fn execute_session_end(
     }
 }
 
+/// Ejecuta la herramienta `brain_relate` (SRS §11, §21.1, F5-03).
+pub async fn execute_relate(
+    args: serde_json::Value,
+    relate_uc: Option<Arc<RelateUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Write) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let source = match args.get("source").and_then(|v| v.as_str()) {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => return ToolCallResult::error("El argumento 'source' es obligatorio."),
+    };
+
+    let target = match args.get("target").and_then(|v| v.as_str()) {
+        Some(t) if !t.trim().is_empty() => t.to_string(),
+        _ => return ToolCallResult::error("El argumento 'target' es obligatorio."),
+    };
+
+    let relation_str = match args.get("relation").and_then(|v| v.as_str()) {
+        Some(r) => r,
+        None => return ToolCallResult::error("El argumento 'relation' es obligatorio."),
+    };
+
+    let relation = match RelationType::from_str(relation_str) {
+        Ok(r) => r,
+        Err(_) => {
+            return ToolCallResult::error(format!(
+                "Tipo de relación inválido: '{relation_str}'. Debe ser uno de: RELATED_TO, USED_IN, CAUSED_BY, SOLVES, CONTRADICTS, SUPERSEDES, DERIVED_FROM, DEPENDS_ON, PREFERS, AVOID."
+            ));
+        }
+    };
+
+    let weight = args
+        .get("weight")
+        .and_then(|v| v.as_f64())
+        .map(|w| w as f32);
+    let context = args
+        .get("context")
+        .and_then(|v| v.as_str())
+        .map(|c| c.to_string());
+
+    let Some(uc) = relate_uc else {
+        return ToolCallResult::error(
+            "El caso de uso RelateUseCase no está disponible en este servidor.",
+        );
+    };
+
+    let mut cmd = RelateCommand::new(source, target, relation);
+    if let Some(w) = weight {
+        cmd = cmd.with_weight(w);
+    }
+    if let Some(ctx) = context {
+        cmd = cmd.with_context(ctx);
+    }
+
+    match uc.execute(cmd).await {
+        Ok(edge) => {
+            info!(
+                edge_id = %edge.id,
+                relation = %edge.relation_type,
+                "Relación semántica registrada exitosamente vía MCP"
+            );
+            ToolCallResult::success(format!(
+                "Relación establecida exitosamente en el grafo de conocimiento.\nID Arista: {}\nTipo: {}\nPeso: {:.2}",
+                edge.id, edge.relation_type, edge.weight
+            ))
+        }
+        Err(e) => {
+            warn!(error = %e, "Fallo al ejecutar RelateUseCase vía MCP");
+            ToolCallResult::error(format!("Error al registrar relación en el grafo: {e}"))
+        }
+    }
+}
+
+/// Ejecuta la herramienta `brain_graph` (SRS §11, §13.2, F5-03).
+pub async fn execute_graph(
+    args: serde_json::Value,
+    traverse_uc: Option<Arc<TraverseGraphUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Read) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let node = match args.get("node").and_then(|v| v.as_str()) {
+        Some(n) if !n.trim().is_empty() => n.to_string(),
+        _ => return ToolCallResult::error("El argumento 'node' es obligatorio."),
+    };
+
+    let depth = args.get("depth").and_then(|v| v.as_u64()).map(|d| d as u32);
+    let direction = args
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .and_then(|d| TraversalDirection::from_str(d).ok());
+    let min_weight = args
+        .get("min_weight")
+        .and_then(|v| v.as_f64())
+        .map(|w| w as f32);
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|l| l as usize);
+
+    let relation_types = args
+        .get("relation_types")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|val| val.as_str().and_then(|s| RelationType::from_str(s).ok()))
+                .collect()
+        });
+
+    let Some(uc) = traverse_uc else {
+        return ToolCallResult::error(
+            "El caso de uso TraverseGraphUseCase no está disponible en este servidor.",
+        );
+    };
+
+    let mut query = TraverseGraphQuery::new(node);
+    if let Some(d) = depth {
+        query = query.with_depth(d);
+    }
+    if let Some(dir) = direction {
+        query = query.with_direction(dir);
+    }
+    if let Some(rels) = relation_types {
+        query = query.with_relations(rels);
+    }
+    query.min_weight = min_weight;
+    query.limit = limit;
+
+    match uc.execute(query).await {
+        Ok(subgraph) => {
+            let mut out = format!(
+                "Grafo de Conocimiento centrado en '{}' (Tipo: {}, ID: {})\n",
+                subgraph.root.label, subgraph.root.node_type, subgraph.root.id
+            );
+            out.push_str(&format!(
+                "Total nodos conectados: {}\nTotal aristas: {}\n\n",
+                subgraph.nodes.len(),
+                subgraph.edges.len()
+            ));
+
+            out.push_str("=== Pasos de Exploración / Vecindad ===\n");
+            for step in &subgraph.steps {
+                if step.depth == 0 {
+                    out.push_str(&format!("* [Raíz] {}\n", step.label));
+                } else {
+                    let rel_str = step
+                        .relation_type
+                        .map_or("CONECTADO_A".to_string(), |r| r.to_string());
+                    out.push_str(&format!(
+                        "  └─ (Salto {}) --[{}]--> {} (ID: {}, Peso acumulado: {:.2})\n",
+                        step.depth, rel_str, step.label, step.node_id, step.accumulated_weight
+                    ));
+                }
+            }
+
+            let sanitized = format!(
+                "<untrusted_graph_context>\n{}\n</untrusted_graph_context>",
+                out.replace(
+                    "</untrusted_graph_context>",
+                    "&lt;/untrusted_graph_context&gt;"
+                )
+            );
+
+            ToolCallResult::success(sanitized)
+        }
+        Err(e) => {
+            warn!(error = %e, "Fallo al ejecutar TraverseGraphUseCase vía MCP");
+            ToolCallResult::error(format!("Error al explorar el grafo: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -863,5 +1120,49 @@ mod tests {
         .await;
         assert!(!res_ok.is_error);
         assert!(res_ok.content[0].text.contains("eliminado lógicamente"));
+    }
+
+    #[tokio::test]
+    async fn test_relate_and_graph_tools_flow() {
+        use brain_graph::InMemoryGraphRepository;
+
+        let graph_repo = Arc::new(InMemoryGraphRepository::new());
+        let relate_uc = Arc::new(RelateUseCase::new(graph_repo.clone()));
+        let traverse_uc = Arc::new(TraverseGraphUseCase::new(graph_repo));
+        let policy = McpSecurityPolicy::new_full();
+
+        // 1. Vincular conceptos
+        let relate_args = json!({
+            "source": "Rust",
+            "target": "PostgreSQL",
+            "relation": "USED_IN",
+            "weight": 0.9,
+            "context": "Base de datos principal"
+        });
+        let res_relate = execute_relate(relate_args, Some(relate_uc.clone()), &policy).await;
+        assert!(!res_relate.is_error);
+        assert!(res_relate.content[0].text.contains("USED_IN"));
+
+        // 2. Explorar grafo
+        let graph_args = json!({
+            "node": "Rust",
+            "depth": 1
+        });
+        let res_graph = execute_graph(graph_args, Some(traverse_uc), &policy).await;
+        assert!(!res_graph.is_error);
+        let graph_txt = &res_graph.content[0].text;
+        assert!(graph_txt.contains("<untrusted_graph_context>"));
+        assert!(graph_txt.contains("PostgreSQL"));
+
+        // 3. Permiso de solo lectura bloquea relate
+        let ro_policy = McpSecurityPolicy::new_read_only();
+        let ro_res = execute_relate(
+            json!({"source": "A", "target": "B", "relation": "RELATED_TO"}),
+            Some(relate_uc),
+            &ro_policy,
+        )
+        .await;
+        assert!(ro_res.is_error);
+        assert!(ro_res.content[0].text.contains("Permiso denegado"));
     }
 }
