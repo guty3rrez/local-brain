@@ -177,3 +177,103 @@ async fn postgres_repository_not_found_errors() {
         Err(DomainError::RepositoryError(_))
     ));
 }
+
+#[tokio::test]
+async fn postgres_repository_specialized_types_and_session_expiration() {
+    use brain_domain::model::{
+        AssociativeMemoryData, EpisodicMemoryData, MemoryTypeData, ProceduralMemoryData,
+        ProcedureStep, SemanticMemoryData, WorkingMemoryData,
+    };
+
+    let Some(repo) = get_test_repository().await else {
+        eprintln!("PostgreSQL no disponible, omitiendo test de integración.");
+        return;
+    };
+
+    let session_id = format!("sess-{}", uuid::Uuid::new_v4());
+    let prov = Provenance::new(MemoryOrigin::Observation).with_session(&session_id);
+
+    // 1. Episodic Memory
+    let ep_data = EpisodicMemoryData::new(
+        "test-proj",
+        "antigravity",
+        "Migración SQLx",
+        "Añadir columna expires_at",
+        "Migración idempotente ejecutada",
+    )
+    .unwrap();
+    let ep_mem = Memory::new_episodic_specialized(ep_data.clone(), prov.clone(), None).unwrap();
+    repo.save(&ep_mem).await.unwrap();
+
+    let fetched_ep = repo.find_by_id(&ep_mem.id).await.unwrap().unwrap();
+    assert_eq!(fetched_ep.memory_type, MemoryType::Episodic);
+    assert_eq!(fetched_ep.type_data, MemoryTypeData::Episodic(ep_data));
+
+    // 2. Semantic Memory
+    let sem_data = SemanticMemoryData::new(
+        "Las migraciones idempotentes reducen fallos en CI",
+        Confidence::verified(),
+        vec![ep_mem.id],
+    )
+    .unwrap();
+    let sem_mem =
+        Memory::new_semantic_specialized(sem_data.clone(), Confidence::verified(), prov.clone())
+            .unwrap();
+    repo.save(&sem_mem).await.unwrap();
+
+    let fetched_sem = repo.find_by_id(&sem_mem.id).await.unwrap().unwrap();
+    assert_eq!(fetched_sem.memory_type, MemoryType::Semantic);
+    assert_eq!(fetched_sem.type_data, MemoryTypeData::Semantic(sem_data));
+
+    // 3. Procedural Memory
+    let steps = vec![
+        ProcedureStep::new(1, "Escribir archivo .sql").unwrap(),
+        ProcedureStep::new(2, "Ejecutar sqlx migrate run").unwrap(),
+    ];
+    let proc_data =
+        ProceduralMemoryData::new("Nueva migración", "Aplicar cambios de esquema", steps).unwrap();
+    let proc_mem = Memory::new_procedural_specialized(proc_data.clone(), prov.clone()).unwrap();
+    repo.save(&proc_mem).await.unwrap();
+
+    let fetched_proc = repo.find_by_id(&proc_mem.id).await.unwrap().unwrap();
+    assert_eq!(fetched_proc.memory_type, MemoryType::Procedural);
+    assert_eq!(
+        fetched_proc.type_data,
+        MemoryTypeData::Procedural(proc_data)
+    );
+
+    // 4. Associative Memory y find_associations
+    let assoc_data = AssociativeMemoryData::new("SQLx", "PostgreSQL", "driver_for", 0.95).unwrap();
+    let assoc_mem = Memory::new_associative_specialized(assoc_data.clone(), prov.clone()).unwrap();
+    repo.save(&assoc_mem).await.unwrap();
+
+    let fetched_assoc = repo.find_by_id(&assoc_mem.id).await.unwrap().unwrap();
+    assert_eq!(fetched_assoc.memory_type, MemoryType::Associative);
+
+    let associations = repo.find_associations("SQLx", 10).await.unwrap();
+    assert!(!associations.is_empty());
+    assert!(associations.iter().any(|m| m.id == assoc_mem.id));
+
+    // 5. Working Memory con sesión y TTL
+    let work_data = WorkingMemoryData::new(&session_id)
+        .unwrap()
+        .with_goal("Verificar índices de sesión")
+        .with_ttl(3600)
+        .unwrap();
+    let work_mem = Memory::new_working_specialized(work_data, prov.clone()).unwrap();
+    repo.save(&work_mem).await.unwrap();
+
+    let session_active = repo.find_active_by_session(&session_id, 10).await.unwrap();
+    assert_eq!(session_active.len(), 1);
+    assert_eq!(session_active[0].id, work_mem.id);
+
+    // 6. expire_session archiva las working memories de la sesión
+    let expired_count = repo.expire_session(&session_id).await.unwrap();
+    assert_eq!(expired_count, 1);
+
+    let session_after = repo.find_active_by_session(&session_id, 10).await.unwrap();
+    assert!(session_after.is_empty());
+
+    let re_work = repo.find_by_id(&work_mem.id).await.unwrap().unwrap();
+    assert_eq!(re_work.status, MemoryStatus::Archived);
+}

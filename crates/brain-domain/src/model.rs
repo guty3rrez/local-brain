@@ -12,6 +12,9 @@ use uuid::Uuid;
 /// Límite máximo para el contenido textual de una memoria (64 KB).
 pub const MAX_MEMORY_CONTENT_BYTES: usize = 64 * 1024;
 
+pub mod specialized;
+pub use specialized::*;
+
 /// Errores de invariantes y lógica del dominio puro.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum DomainError {
@@ -40,6 +43,30 @@ pub enum DomainError {
 
     #[error("Error de persistencia en repositorio: {0}")]
     RepositoryError(String),
+
+    #[error("La confianza {confidence} requiere al menos {minimum_required} evidencia(s) verificable(s)")]
+    InsufficientEvidenceForHighConfidence {
+        confidence: String,
+        minimum_required: usize,
+    },
+
+    #[error("El identificador de sesión no puede estar vacío")]
+    InvalidSessionId,
+
+    #[error("El valor de TTL debe ser mayor a 0 segundos (recibido: {0})")]
+    InvalidTtl(u64),
+
+    #[error("El campo '{0}' es obligatorio y no puede estar vacío")]
+    EmptyField(String),
+
+    #[error("Un procedimiento debe contener al menos un paso")]
+    EmptyProcedureSteps,
+
+    #[error("Secuencia inválida de pasos en el procedimiento: se esperaba el paso {expected} pero se encontró {actual}")]
+    InvalidStepSequence { expected: u32, actual: u32 },
+
+    #[error("Asociación inválida: {0}")]
+    InvalidAssociation(String),
 }
 
 /// Identificador único fuertemente tipado de una memoria (SRS §9.1).
@@ -402,6 +429,8 @@ pub struct Memory {
     pub status: MemoryStatus,
     pub version: Version,
     pub embedding: Option<Vec<f32>>,
+    pub type_data: MemoryTypeData,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl Memory {
@@ -427,6 +456,8 @@ impl Memory {
             status: MemoryStatus::Active,
             version: Version::initial(),
             embedding: None,
+            type_data: MemoryTypeData::Generic,
+            expires_at: None,
         }
     }
 
@@ -464,6 +495,101 @@ impl Memory {
         let mut memory = Self::new(content, MemoryType::Working, prov);
         memory.importance = Importance::neutral();
         memory
+    }
+
+    /// Crea una memoria de trabajo especializada con TTL y tracking de hipótesis (SRS §10.1, F4-01).
+    pub fn new_working_specialized(
+        data: WorkingMemoryData,
+        source: Provenance,
+    ) -> Result<Self, DomainError> {
+        let content_text = if let Some(ref goal) = data.goal {
+            if data.hypotheses.is_empty() {
+                format!("Sesión: {}\nObjetivo: {}", data.session_id, goal)
+            } else {
+                format!(
+                    "Sesión: {}\nObjetivo: {}\nHipótesis:\n- {}",
+                    data.session_id,
+                    goal,
+                    data.hypotheses.join("\n- ")
+                )
+            }
+        } else if !data.hypotheses.is_empty() {
+            format!(
+                "Sesión: {}\nHipótesis:\n- {}",
+                data.session_id,
+                data.hypotheses.join("\n- ")
+            )
+        } else {
+            format!("Memoria de trabajo activa (Sesión: {})", data.session_id)
+        };
+
+        let content = MemoryContent::new(content_text)?;
+        let prov = source.with_session(data.session_id.clone());
+        let mut memory = Self::new(content, MemoryType::Working, prov);
+        memory.importance = Importance::neutral();
+
+        if let Some(ttl) = data.ttl_seconds {
+            memory.expires_at = Some(memory.created_at + chrono::Duration::seconds(ttl as i64));
+        }
+        memory.type_data = MemoryTypeData::Working(data);
+        Ok(memory)
+    }
+
+    /// Crea una memoria episódica especializada preservando contexto, acción y resultado (SRS §10.2, F4-02).
+    pub fn new_episodic_specialized(
+        data: EpisodicMemoryData,
+        source: Provenance,
+        importance: Option<Importance>,
+    ) -> Result<Self, DomainError> {
+        let content_text = data.to_content_text();
+        let content = MemoryContent::new(content_text)?;
+        let prov = source.with_agent(data.agent.clone());
+        let mut memory = Self::new(content, MemoryType::Episodic, prov);
+        memory.project = Some(data.project.clone());
+        memory.agent = Some(data.agent.clone());
+        memory.importance = importance.unwrap_or_else(Importance::high);
+        memory.type_data = MemoryTypeData::Episodic(data);
+        Ok(memory)
+    }
+
+    /// Crea una memoria semántica especializada con validación de evidencia y confianza (SRS §10.3, F4-03).
+    pub fn new_semantic_specialized(
+        data: SemanticMemoryData,
+        confidence: Confidence,
+        source: Provenance,
+    ) -> Result<Self, DomainError> {
+        let content = MemoryContent::new(data.statement.clone())?;
+        let mut memory = Self::new(content, MemoryType::Semantic, source);
+        memory.confidence = confidence;
+        memory.type_data = MemoryTypeData::Semantic(data);
+        Ok(memory)
+    }
+
+    /// Crea una memoria procedimental especializada con secuencia validada de pasos (SRS §10.4, F4-04).
+    pub fn new_procedural_specialized(
+        data: ProceduralMemoryData,
+        source: Provenance,
+    ) -> Result<Self, DomainError> {
+        let content_text = data.to_content_text();
+        let content = MemoryContent::new(content_text)?;
+        let mut memory = Self::new(content, MemoryType::Procedural, source);
+        memory.importance = Importance::high();
+        memory.type_data = MemoryTypeData::Procedural(data);
+        Ok(memory)
+    }
+
+    /// Crea una memoria asociativa especializada representando vínculos conceptuales (SRS §10.5, F4-05).
+    pub fn new_associative_specialized(
+        data: AssociativeMemoryData,
+        source: Provenance,
+    ) -> Result<Self, DomainError> {
+        let content_text = data.to_content_text();
+        let content = MemoryContent::new(content_text)?;
+        let mut memory = Self::new(content, MemoryType::Associative, source);
+        memory.importance =
+            Importance::new(data.strength).unwrap_or_else(|_| Importance::neutral());
+        memory.type_data = MemoryTypeData::Associative(data);
+        Ok(memory)
     }
 
     /// Actualiza el contenido textual, recalculando el hash, actualizando el timestamp y elevando la versión.
@@ -522,11 +648,30 @@ impl Memory {
     }
 
     /// Comprueba si la memoria está activa para consultas operativas normales (SRS §9.1, §12.3).
+    ///
+    /// Para memorias de trabajo con TTL (`expires_at`), verifica además que no hayan expirado.
     pub fn is_active(&self) -> bool {
-        matches!(
+        if !matches!(
             self.status,
             MemoryStatus::Active | MemoryStatus::PendingEmbedding
-        )
+        ) {
+            return false;
+        }
+        if let Some(exp) = self.expires_at {
+            if Utc::now() >= exp {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Indica si la memoria ha expirado respecto a un instante temporal de referencia.
+    pub fn is_expired_at(&self, now: DateTime<Utc>) -> bool {
+        if let Some(exp) = self.expires_at {
+            now >= exp
+        } else {
+            false
+        }
     }
 }
 
@@ -638,5 +783,197 @@ mod tests {
 
         assert!(memory.restore().is_ok());
         assert_eq!(memory.status, MemoryStatus::Active);
+    }
+
+    #[test]
+    fn working_memory_ttl_and_expiration() {
+        let prov = Provenance::new(MemoryOrigin::Observation);
+        let data = WorkingMemoryData::new("sess-1")
+            .unwrap()
+            .with_goal("Depurar error 500 en endpoint")
+            .with_ttl(60)
+            .unwrap()
+            .with_hypotheses(vec!["Posible conexión nula en pool".to_string()]);
+
+        let memory = Memory::new_working_specialized(data, prov.clone()).unwrap();
+        assert_eq!(memory.memory_type, MemoryType::Working);
+        assert!(memory.expires_at.is_some());
+        assert!(memory.is_active());
+
+        // Verificación de expiración temporal determinista
+        let past = memory.created_at - chrono::Duration::seconds(10);
+        let future_before_expiry = memory.created_at + chrono::Duration::seconds(30);
+        let future_after_expiry = memory.created_at + chrono::Duration::seconds(70);
+
+        assert!(!memory.is_expired_at(past));
+        assert!(!memory.is_expired_at(future_before_expiry));
+        assert!(memory.is_expired_at(future_after_expiry));
+
+        // Invariantes de WorkingMemoryData
+        assert_eq!(
+            WorkingMemoryData::new("").unwrap_err(),
+            DomainError::InvalidSessionId
+        );
+        assert_eq!(
+            WorkingMemoryData::new("   ").unwrap_err(),
+            DomainError::InvalidSessionId
+        );
+        assert_eq!(
+            WorkingMemoryData::new("s")
+                .unwrap()
+                .with_ttl(0)
+                .unwrap_err(),
+            DomainError::InvalidTtl(0)
+        );
+    }
+
+    #[test]
+    fn episodic_memory_invariants_and_synthesis() {
+        let prov = Provenance::new(MemoryOrigin::Observation);
+        let valid_data = EpisodicMemoryData::new(
+            "local-brain",
+            "antigravity",
+            "Evaluación de persistencia",
+            "Adoptamos PostgreSQL con SQLx",
+            "Logramos transacciones ACID e integración nativa con pgvector",
+        )
+        .unwrap();
+
+        let memory =
+            Memory::new_episodic_specialized(valid_data.clone(), prov.clone(), None).unwrap();
+        assert_eq!(memory.memory_type, MemoryType::Episodic);
+        assert_eq!(memory.project.as_deref(), Some("local-brain"));
+        assert_eq!(memory.agent.as_deref(), Some("antigravity"));
+        assert!(memory.content.text().contains("Adoptamos PostgreSQL"));
+
+        // Campos vacíos deben ser rechazados
+        assert!(matches!(
+            EpisodicMemoryData::new("", "a", "c", "a", "o"),
+            Err(DomainError::EmptyField(_))
+        ));
+        assert!(matches!(
+            EpisodicMemoryData::new("p", "", "c", "a", "o"),
+            Err(DomainError::EmptyField(_))
+        ));
+        assert!(matches!(
+            EpisodicMemoryData::new("p", "a", "  ", "a", "o"),
+            Err(DomainError::EmptyField(_))
+        ));
+    }
+
+    #[test]
+    fn semantic_memory_evidence_invariant() {
+        let prov = Provenance::new(MemoryOrigin::Reflection);
+        let ev_id = MemoryId::new();
+
+        // 1. Alta confianza (>= 0.8) sin evidencia debe fallar (SRS §60, DoD F4-03)
+        let high_conf = Confidence::verified(); // 0.85
+        let err = SemanticMemoryData::new("Regla general sin evidencia", high_conf, vec![]);
+        assert!(matches!(
+            err,
+            Err(DomainError::InsufficientEvidenceForHighConfidence { .. })
+        ));
+
+        // 2. Alta confianza con evidencia debe tener éxito
+        let valid_semantic = SemanticMemoryData::new(
+            "Clean Architecture previene acoplamiento en dominios complejos",
+            high_conf,
+            vec![ev_id],
+        )
+        .unwrap();
+        let memory =
+            Memory::new_semantic_specialized(valid_semantic, high_conf, prov.clone()).unwrap();
+        assert_eq!(memory.confidence, high_conf);
+        assert_eq!(memory.memory_type, MemoryType::Semantic);
+
+        // 3. Confianza tentativa (< 0.8) sin evidencia es permitida
+        let tentative_conf = Confidence::tentative(); // 0.3
+        let tentative_semantic = SemanticMemoryData::new(
+            "Hipótesis preliminar no corroborada",
+            tentative_conf,
+            vec![],
+        );
+        assert!(tentative_semantic.is_ok());
+    }
+
+    #[test]
+    fn procedural_memory_sequence_validation() {
+        let prov = Provenance::new(MemoryOrigin::Observation);
+
+        let step1 = ProcedureStep::new(1, "Crear migración SQLx").unwrap();
+        let step2 = ProcedureStep::new(2, "Implementar puerto en dominio").unwrap();
+        let step3 = ProcedureStep::new(3, "Implementar adaptador en infraestructura").unwrap();
+
+        let mut proc_data = ProceduralMemoryData::new(
+            "Pipeline Hexagonal",
+            "Agregar nueva entidad persistente",
+            vec![step1, step2, step3],
+        )
+        .unwrap();
+
+        assert_eq!(proc_data.step_version, 1);
+        assert_eq!(proc_data.steps.len(), 3);
+
+        // Añadir paso incrementa la versión y numera correctamente
+        proc_data.append_step("Escribir tests BDD").unwrap();
+        assert_eq!(proc_data.step_version, 2);
+        assert_eq!(proc_data.steps.len(), 4);
+        assert_eq!(proc_data.steps[3].step_number, 4);
+
+        let memory = Memory::new_procedural_specialized(proc_data, prov).unwrap();
+        assert_eq!(memory.memory_type, MemoryType::Procedural);
+        assert!(memory.content.text().contains("1. Crear migración SQLx"));
+
+        // Secuencia inválida (salto de paso 1 a 3) debe fallar
+        let s1 = ProcedureStep::new(1, "Paso 1").unwrap();
+        let s3 = ProcedureStep::new(3, "Paso 3").unwrap();
+        assert_eq!(
+            ProceduralMemoryData::new("Proc inválido", "Meta", vec![s1, s3]).unwrap_err(),
+            DomainError::InvalidStepSequence {
+                expected: 2,
+                actual: 3,
+            }
+        );
+
+        // Sin pasos debe fallar
+        assert_eq!(
+            ProceduralMemoryData::new("Proc vacío", "Meta", vec![]).unwrap_err(),
+            DomainError::EmptyProcedureSteps
+        );
+    }
+
+    #[test]
+    fn associative_memory_invariants() {
+        let prov = Provenance::new(MemoryOrigin::Observation);
+
+        let valid_data =
+            AssociativeMemoryData::new("Flutter", "Riverpod", "uses_state_management", 0.9)
+                .unwrap()
+                .with_context("Recomendado para apps medianas y grandes");
+
+        let memory = Memory::new_associative_specialized(valid_data, prov).unwrap();
+        assert_eq!(memory.memory_type, MemoryType::Associative);
+        assert!(memory
+            .content
+            .text()
+            .contains("Flutter --[uses_state_management]--> Riverpod"));
+
+        // Auto-asociación prohibida
+        assert!(matches!(
+            AssociativeMemoryData::new("Rust", "rust", "same", 0.5),
+            Err(DomainError::InvalidAssociation(_))
+        ));
+
+        // Fuerza fuera de rango prohibida
+        assert!(matches!(
+            AssociativeMemoryData::new("A", "B", "rel", 1.5),
+            Err(DomainError::OutOfRange(_))
+        ));
+
+        // Conceptos vacíos prohibidos
+        assert!(matches!(
+            AssociativeMemoryData::new(" ", "B", "rel", 0.5),
+            Err(DomainError::EmptyField(_))
+        ));
     }
 }

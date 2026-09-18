@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sqlx::Row;
 
 use brain_application::{
-    EmbedPendingUseCase, ForgetUseCase, RecallQuery, RecallUseCase, RememberCommand,
-    RememberUseCase,
+    EmbedPendingUseCase, ExpireSessionUseCase, ForgetUseCase, PurgeExpiredUseCase, RecallQuery,
+    RecallUseCase, RememberCommand, RememberUseCase,
 };
 use brain_core::CORE_VERSION;
 use brain_domain::model::{DomainError, MemoryId, MemoryStatus, MemoryType};
@@ -66,6 +66,18 @@ enum Commands {
 
     /// Inicia el servidor Model Context Protocol (MCP) sobre stdio para agentes de IA (SRS §21, §31, §32)
     Mcp(McpArgs),
+
+    /// Finaliza una sesión de trabajo activa expirando sus recuerdos de trabajo (SRS §10.1, §21.4)
+    SessionEnd(SessionEndArgs),
+
+    /// Purga o archiva recuerdos volátiles expirados por TTL (SRS §10.1)
+    PurgeExpired,
+}
+
+#[derive(Args, Debug)]
+struct SessionEndArgs {
+    /// Identificador de la sesión de trabajo que finaliza
+    session_id: String,
 }
 
 #[derive(Args, Debug)]
@@ -81,8 +93,8 @@ struct McpArgs {
 
 #[derive(Args, Debug)]
 struct RememberArgs {
-    /// Contenido textual del recuerdo
-    content: String,
+    /// Contenido textual del recuerdo (opcional si se proveen flags estructurados)
+    content: Option<String>,
 
     /// Proyecto asociado
     #[arg(short, long)]
@@ -103,6 +115,42 @@ struct RememberArgs {
     /// Nivel de confianza o evidencia empírica (0.0 a 1.0)
     #[arg(short, long)]
     confidence: Option<f32>,
+
+    /// Identificador de sesión para memorias de trabajo (working memory)
+    #[arg(long)]
+    session_id: Option<String>,
+
+    /// Tiempo de vida en segundos antes de expirar (working memory)
+    #[arg(long)]
+    ttl: Option<u64>,
+
+    /// Contexto situacional para recuerdos episódicos especializados
+    #[arg(long)]
+    context: Option<String>,
+
+    /// Acción ejecutada para recuerdos episódicos especializados
+    #[arg(long)]
+    action: Option<String>,
+
+    /// Resultado obtenido para recuerdos episódicos especializados
+    #[arg(long)]
+    outcome: Option<String>,
+
+    /// Concepto de origen para memorias asociativas
+    #[arg(long)]
+    source_concept: Option<String>,
+
+    /// Concepto de destino para memorias asociativas
+    #[arg(long)]
+    target_concept: Option<String>,
+
+    /// Predicado o relación para memorias asociativas
+    #[arg(long)]
+    predicate: Option<String>,
+
+    /// Fuerza de asociación (0.0 a 1.0)
+    #[arg(long)]
+    strength: Option<f32>,
 }
 
 #[derive(Args, Debug)]
@@ -122,6 +170,14 @@ struct RecallArgs {
     /// Filtrar por tipo de memoria
     #[arg(short = 't', long = "type", value_enum)]
     memory_type: Option<CliMemoryType>,
+
+    /// Filtrar por identificador de sesión
+    #[arg(long)]
+    session_id: Option<String>,
+
+    /// Filtrar asociaciones conceptuales por término
+    #[arg(long)]
+    concept: Option<String>,
 
     /// Similitud mínima coseno requerida en búsqueda semántica (0.0 a 1.0)
     #[arg(long)]
@@ -287,13 +343,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ctx.embedding_provider,
                 ctx.vector_repo,
             );
-            let mut cmd = RememberCommand::new(&args.content).with_type(args.memory_type.into());
 
-            if let Some(project) = args.project {
-                cmd = cmd.with_project(project);
+            let project = args.project.as_deref().unwrap_or("default");
+            let agent = args.agent.as_deref().unwrap_or("cli");
+
+            let mut cmd = if let (Some(ctx_str), Some(act), Some(out)) =
+                (&args.context, &args.action, &args.outcome)
+            {
+                match RememberCommand::episodic(project, agent, ctx_str, act, out) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("❌ Error en parámetros de memoria episódica: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if let (Some(src), Some(tgt), Some(pred)) =
+                (&args.source_concept, &args.target_concept, &args.predicate)
+            {
+                let strn = args.strength.unwrap_or(0.5);
+                match RememberCommand::associative(src, tgt, pred, strn) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("❌ Error en parámetros de memoria asociativa: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if args.memory_type == CliMemoryType::Working
+                || (args.session_id.is_some() && args.ttl.is_some())
+            {
+                let sid = args.session_id.as_deref().unwrap_or("default-session");
+                let content = args.content.as_deref().unwrap_or("Memoria de trabajo CLI");
+                match RememberCommand::working(sid, content, args.ttl) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("❌ Error en parámetros de memoria de trabajo: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if let Some(content) = args.content {
+                RememberCommand::new(content).with_type(args.memory_type.into())
+            } else {
+                eprintln!("❌ Se requiere especificar el contenido o los flags especializados (--context/--action/--outcome, --source-concept/--target-concept/--predicate, o --session-id/--ttl).");
+                std::process::exit(1);
+            };
+
+            if let Some(proj) = args.project {
+                cmd = cmd.with_project(proj);
             }
-            if let Some(agent) = args.agent {
-                cmd = cmd.with_agent(agent);
+            if let Some(ag) = args.agent {
+                cmd = cmd.with_agent(ag);
+            }
+            if let Some(sid) = args.session_id {
+                cmd = cmd.with_session(sid);
+            }
+            if let Some(ttl) = args.ttl {
+                cmd = cmd.with_ttl(ttl);
             }
             if let Some(imp) = args.importance {
                 cmd = cmd.with_importance(imp);
@@ -368,6 +472,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(mtype) = args.memory_type {
                 query.memory_type = Some(mtype.into());
+            }
+            if let Some(sid) = args.session_id {
+                query.session_id = Some(sid);
+            }
+            if let Some(concept) = args.concept {
+                query.concept = Some(concept);
             }
             if let Some(min_sim) = args.min_similarity {
                 query = query.with_min_similarity(min_sim);
@@ -517,6 +627,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!(
                                 "   Recuerdos:           Total: {total} | Activos: {active} | Pendientes Embedding: {pending} | Eliminados: {soft_deleted}"
                             );
+
+                            let type_stats = sqlx::query(
+                                r#"
+                                SELECT memory_type, COUNT(*)::bigint AS cnt
+                                FROM memories
+                                WHERE status = 'active'
+                                GROUP BY memory_type
+                                ORDER BY cnt DESC
+                                "#,
+                            )
+                            .fetch_all(&pool)
+                            .await;
+
+                            if let Ok(rows) = type_stats {
+                                if !rows.is_empty() {
+                                    let type_summary: Vec<String> = rows
+                                        .iter()
+                                        .map(|r| {
+                                            let mtype: String =
+                                                r.try_get("memory_type").unwrap_or_default();
+                                            let cnt: i64 = r.try_get("cnt").unwrap_or(0);
+                                            format!("{mtype}: {cnt}")
+                                        })
+                                        .collect();
+                                    println!(
+                                        "   Por Tipo (activos):  {}",
+                                        type_summary.join(" | ")
+                                    );
+                                }
+                            }
                         }
                         Err(sqlx::Error::Database(db_err))
                             if db_err.code().as_deref() == Some("42P01") =>
@@ -576,6 +716,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ctx.vector_repo.clone(),
             ));
             let forget_uc = Arc::new(ForgetUseCase::new(ctx.memory_repo.clone()));
+            let expire_session_uc = Arc::new(ExpireSessionUseCase::new(ctx.memory_repo.clone()));
 
             let security = if args.read_only {
                 McpSecurityPolicy::new_read_only()
@@ -585,10 +726,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 McpSecurityPolicy::new_default()
             };
 
-            let server = McpServer::new(remember_uc, recall_uc, forget_uc, security);
+            let server = McpServer::new(remember_uc, recall_uc, forget_uc, security)
+                .with_expire_session_uc(expire_session_uc);
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ Error en servidor MCP: {e}");
                 std::process::exit(1);
+            }
+        }
+
+        Commands::SessionEnd(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let use_case = ExpireSessionUseCase::new(ctx.memory_repo);
+            println!("🔄 Finalizando sesión de trabajo '{}'...", args.session_id);
+            match use_case.execute(&args.session_id).await {
+                Ok(count) => {
+                    println!("✅ Sesión '{}' finalizada exitosamente.", args.session_id);
+                    println!("   Recuerdos de trabajo archivados/expirados: {count}");
+                }
+                Err(e) => {
+                    eprintln!("❌ Error al finalizar sesión: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::PurgeExpired => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let use_case = PurgeExpiredUseCase::new(ctx.memory_repo);
+            println!("🔄 Purgando recuerdos volátiles expirados...");
+            match use_case.execute().await {
+                Ok(count) => {
+                    println!("✅ Purga de recuerdos expirados completada exitosamente.");
+                    println!("   Recuerdos purgados: {count}");
+                }
+                Err(e) => {
+                    eprintln!("❌ Error al purgar recuerdos expirados: {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }

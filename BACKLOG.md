@@ -16,7 +16,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | **Fase 1** | Memory Core (MVP Parte 1) | 🟢 Completado | `[██████████] 100%` | Dominio Puro + Casos de Uso + Persistencia + CLI |
 | **Fase 2** | Embeddings & Vector Search (MVP Parte 2) | 🟢 Completado | `[██████████] 100%` | Integration + BDD + Wiremock + pgvector |
 | **Fase 3** | MCP Server (MVP Parte 3) | 🟢 Completado | `[██████████] 100%` | E2E + BDD + Security |
-| **Fase 4** | Memory Types Specialization | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Mutation |
+| **Fase 4** | Memory Types Specialization | 🟢 Completado | `[██████████] 100%` | Unit + Integration + BDD + MCP + CLI |
 | **Fase 5** | Knowledge Graph & Relations | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Unit + Integration |
 | **Fase 6** | Learning & Candidate Knowledge | ⚪ Planificado | `[░░░░░░░░░░] 0%` | BDD + Mutation |
 | **Fase 7** | Consolidation & Reflection | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
@@ -196,19 +196,19 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 4 — Especialización de Tipos de Memoria (SRS §10, §68)
 *Objetivo: Implementar el modelo cognitivo completo con los 5 tipos de memoria.*
 
-- [ ] **[F4-01] Working Memory (Memoria de Trabajo)** `P1`
+- [x] **[F4-01] Working Memory (Memoria de Trabajo)** `P1`
   - **Descripción**: Memoria volátil con TTL asociado a la sesión del agente. Almacena hipótesis de depuración y estado temporal.
   - **Arsenal**: *Unit*: Expiración automática por TTL / fin de sesión.
-- [ ] **[F4-02] Episodic Memory (Memoria Episódica)** `P0`
+- [x] **[F4-02] Episodic Memory (Memoria Episódica)** `P0`
   - **Descripción**: Almacenamiento estructurado de experiencias: Contexto, Acción, Resultado, Agente, Proyecto y Timestamps.
   - **Arsenal**: *Unit* + *BDD*.
-- [ ] **[F4-03] Semantic Memory (Memoria Semántica)** `P0`
+- [x] **[F4-03] Semantic Memory (Memoria Semántica)** `P0`
   - **Descripción**: Generalizaciones y hechos comprobados, vinculados a sus evidencias de origen, con cálculo de confianza.
   - **Arsenal**: *Unit*: Invariante de evidencia mínima para alta confianza.
-- [ ] **[F4-04] Procedural Memory (Memoria Procedimental)** `P1`
+- [x] **[F4-04] Procedural Memory (Memoria Procedimental)** `P1`
   - **Descripción**: Procedimientos técnicos paso a paso (recetas, pipelines de comandos, checklists).
   - **Arsenal**: *Unit*: Validación de secuencia y versionado de pasos.
-- [ ] **[F4-05] Associative Memory (Memoria Asociativa)** `P1`
+- [x] **[F4-05] Associative Memory (Memoria Asociativa)** `P1`
   - **Descripción**: Vínculos semánticos y conceptuales entre tecnologías, proyectos y patrones.
   - **Arsenal**: *Unit*: Red de relaciones básicas.
 

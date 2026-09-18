@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tracing::{debug, info};
 
-use brain_application::{ForgetUseCase, RecallUseCase, RememberUseCase};
+use brain_application::{ExpireSessionUseCase, ForgetUseCase, RecallUseCase, RememberUseCase};
 use brain_core::CORE_VERSION;
 
 use crate::protocol::{
@@ -12,7 +12,10 @@ use crate::protocol::{
     ServerInfo, ToolsCapability, ToolsListResult, MCP_PROTOCOL_VERSION,
 };
 use crate::security::McpSecurityPolicy;
-use crate::tools::{execute_forget, execute_recall, execute_remember, execute_search, list_tools};
+use crate::tools::{
+    execute_forget, execute_recall, execute_remember, execute_search, execute_session_end,
+    list_tools,
+};
 
 /// Servidor MCP de Local Brain.
 #[derive(Clone)]
@@ -20,6 +23,7 @@ pub struct McpServer {
     remember_uc: Arc<RememberUseCase>,
     recall_uc: Arc<RecallUseCase>,
     forget_uc: Arc<ForgetUseCase>,
+    expire_session_uc: Option<Arc<ExpireSessionUseCase>>,
     security: McpSecurityPolicy,
 }
 
@@ -35,8 +39,15 @@ impl McpServer {
             remember_uc,
             recall_uc,
             forget_uc,
+            expire_session_uc: None,
             security,
         }
+    }
+
+    /// Adjunta el caso de uso para expiración de sesiones (SRS §10.1, §21.4).
+    pub fn with_expire_session_uc(mut self, expire_session_uc: Arc<ExpireSessionUseCase>) -> Self {
+        self.expire_session_uc = Some(expire_session_uc);
+        self
     }
 
     /// Procesa una solicitud JSON-RPC y retorna la respuesta si corresponde.
@@ -113,6 +124,14 @@ impl McpServer {
                     }
                     "brain_forget" => {
                         execute_forget(arguments, self.forget_uc.clone(), &self.security).await
+                    }
+                    "brain_session_end" => {
+                        execute_session_end(
+                            arguments,
+                            self.expire_session_uc.clone(),
+                            &self.security,
+                        )
+                        .await
                     }
                     _ => {
                         return Some(JsonRpcResponse::error(

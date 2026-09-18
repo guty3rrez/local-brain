@@ -5,7 +5,9 @@ use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 
 use brain_domain::model::{
-    Memory, MemoryContent, MemoryId, MemoryOrigin, MemoryStatus, Provenance,
+    AssociativeMemoryData, EpisodicMemoryData, Memory, MemoryContent, MemoryId, MemoryOrigin,
+    MemoryStatus, MemoryTypeData, ProceduralMemoryData, ProcedureStep, Provenance,
+    SemanticMemoryData, WorkingMemoryData,
 };
 use brain_domain::ports::{MemoryRepository, VectorRepository, DEFAULT_EMBEDDING_DIMENSION};
 use brain_infrastructure::persistence::PostgresMemoryRepository;
@@ -17,6 +19,7 @@ pub struct MemoryWorld {
     retrieved_memory: Option<Memory>,
     indexed_vector: Option<Vec<f32>>,
     search_results: Option<Vec<(MemoryId, f32)>>,
+    domain_error: Option<String>,
 }
 
 #[given(expr = "un repositorio PostgreSQL conectado y con migraciones aplicadas")]
@@ -168,6 +171,240 @@ async fn then_similarity_above(world: &mut MemoryWorld, threshold: f32) {
         "Similitud coseno {} debe ser mayor a {}",
         score,
         threshold
+    );
+}
+
+// Pasos para Tipos Especializados de Memoria (specialized_memory_types.feature)
+
+use brain_domain::model::Confidence;
+
+#[when(
+    expr = "guardo un recuerdo episódico con contexto {string} y acción {string} y resultado {string} para el proyecto {string}"
+)]
+async fn when_saving_specialized_episodic(
+    world: &mut MemoryWorld,
+    context_str: String,
+    action_str: String,
+    outcome_str: String,
+    project_str: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let episodic = EpisodicMemoryData::new(
+        project_str,
+        "bdd-agent",
+        context_str,
+        action_str,
+        outcome_str,
+    )
+    .unwrap();
+    let memory = Memory::new_episodic_specialized(episodic, prov, None).unwrap();
+
+    repo.save(&memory)
+        .await
+        .expect("Debe guardar recuerdo episódico especializado");
+    world.saved_memory = Some(memory);
+}
+
+#[then(expr = "puedo recuperar el recuerdo episódico por su ID")]
+async fn then_retrieve_episodic_by_id(world: &mut MemoryWorld) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let saved = world.saved_memory.as_ref().expect("Memoria no guardada");
+    let retrieved = repo
+        .find_by_id(&saved.id)
+        .await
+        .expect("Error al consultar ID")
+        .expect("Memoria no encontrada");
+    world.retrieved_memory = Some(retrieved);
+}
+
+#[then(
+    expr = "el contexto episódico es {string}, la acción es {string} y el resultado es {string}"
+)]
+async fn then_episodic_fields_match(
+    world: &mut MemoryWorld,
+    expected_context: String,
+    expected_action: String,
+    expected_outcome: String,
+) {
+    let retrieved = world
+        .retrieved_memory
+        .as_ref()
+        .expect("Memoria no recuperada");
+    match &retrieved.type_data {
+        MemoryTypeData::Episodic(data) => {
+            assert_eq!(data.context, expected_context);
+            assert_eq!(data.action, expected_action);
+            assert_eq!(data.outcome, expected_outcome);
+        }
+        other => panic!("Tipo de memoria no esperado: {other:?}"),
+    }
+}
+
+#[when(
+    expr = "guardo un recuerdo de trabajo para la sesión {string} con contenido {string} para el proyecto {string}"
+)]
+async fn when_saving_working_memory(
+    world: &mut MemoryWorld,
+    session_id: String,
+    content_str: String,
+    _project_str: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let working = WorkingMemoryData::new(session_id)
+        .unwrap()
+        .with_goal(content_str)
+        .with_ttl(3600)
+        .unwrap();
+    let memory = Memory::new_working_specialized(working, prov).unwrap();
+
+    repo.save(&memory)
+        .await
+        .expect("Debe guardar recuerdo de trabajo");
+    world.saved_memory = Some(memory);
+}
+
+#[then(regex = r#"^encuentro (\d+) recuerdos? activos? en la sesión "([^"]+)"$"#)]
+async fn then_find_active_by_session(world: &mut MemoryWorld, count: usize, session_id: String) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let active = repo
+        .find_active_by_session(&session_id, 100)
+        .await
+        .expect("Error al buscar recuerdos de sesión");
+    assert_eq!(
+        active.len(),
+        count,
+        "Se esperaban {} recuerdos activos pero se encontraron {}",
+        count,
+        active.len()
+    );
+}
+
+#[when(expr = "expiro la sesión {string}")]
+async fn when_expire_session(world: &mut MemoryWorld, session_id: String) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    repo.expire_session(&session_id)
+        .await
+        .expect("Error al expirar sesión");
+}
+
+#[when(
+    expr = "guardo un recuerdo procedimental para la tarea {string} con {int} pasos para el proyecto {string}"
+)]
+async fn when_saving_procedural_memory(
+    world: &mut MemoryWorld,
+    task_name: String,
+    step_count: usize,
+    _project_str: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let mut steps = Vec::new();
+    for i in 1..=step_count {
+        steps.push(ProcedureStep::new(i as u32, format!("Paso {i}")).unwrap());
+    }
+    let procedural = ProceduralMemoryData::new(task_name.clone(), "Meta de prueba", steps).unwrap();
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let memory = Memory::new_procedural_specialized(procedural, prov).unwrap();
+
+    repo.save(&memory)
+        .await
+        .expect("Debe guardar recuerdo procedimental");
+    world.saved_memory = Some(memory);
+}
+
+#[then(expr = "puedo recuperar el recuerdo procedimental por su ID")]
+async fn then_retrieve_procedural_by_id(world: &mut MemoryWorld) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let saved = world.saved_memory.as_ref().expect("Memoria no guardada");
+    let retrieved = repo
+        .find_by_id(&saved.id)
+        .await
+        .expect("Error al consultar ID")
+        .expect("Memoria no encontrada");
+    world.retrieved_memory = Some(retrieved);
+}
+
+#[then(expr = "el procedimiento tiene {int} pasos y la versión es {int}")]
+async fn then_procedural_fields_match(
+    world: &mut MemoryWorld,
+    expected_steps: usize,
+    expected_version: u32,
+) {
+    let retrieved = world
+        .retrieved_memory
+        .as_ref()
+        .expect("Memoria no recuperada");
+    match &retrieved.type_data {
+        MemoryTypeData::Procedural(data) => {
+            assert_eq!(data.steps.len(), expected_steps);
+            assert_eq!(data.step_version, expected_version);
+        }
+        other => panic!("Tipo de memoria no esperado: {other:?}"),
+    }
+}
+
+#[when(
+    expr = "guardo una asociación desde {string} hacia {string} con predicado {string} para el proyecto {string}"
+)]
+async fn when_saving_associative_memory(
+    world: &mut MemoryWorld,
+    source: String,
+    target: String,
+    predicate: String,
+    _project_str: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let associative =
+        AssociativeMemoryData::new(source.clone(), target.clone(), predicate.clone(), 0.9).unwrap();
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let memory = Memory::new_associative_specialized(associative, prov).unwrap();
+
+    repo.save(&memory)
+        .await
+        .expect("Debe guardar recuerdo asociativo");
+    world.saved_memory = Some(memory);
+}
+
+#[then(expr = "al buscar asociaciones para {string} encuentro relación con {string}")]
+async fn then_find_associations_match(
+    world: &mut MemoryWorld,
+    concept: String,
+    expected_target: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let assocs = repo
+        .find_associations(&concept, 10)
+        .await
+        .expect("Error buscando asociaciones");
+
+    let found = assocs.iter().any(|m| match &m.type_data {
+        MemoryTypeData::Associative(data) => {
+            (data.source_concept == concept && data.target_concept == expected_target)
+                || (data.target_concept == concept && data.source_concept == expected_target)
+        }
+        _ => false,
+    });
+    assert!(
+        found,
+        "No se encontró asociación entre '{concept}' y '{expected_target}'"
+    );
+}
+
+#[given(expr = "que intento crear una memoria semántica con confianza {float} y sin evidencias")]
+async fn given_invalid_semantic_attempt(world: &mut MemoryWorld, confidence: f32) {
+    let conf = Confidence::new(confidence).unwrap();
+    match SemanticMemoryData::new("Afirmación sin evidencia", conf, vec![]) {
+        Ok(_) => world.domain_error = None,
+        Err(err) => world.domain_error = Some(err.to_string()),
+    }
+}
+
+#[then(expr = "la creación es rechazada por regla de invariante")]
+async fn then_rejected_by_invariant(world: &mut MemoryWorld) {
+    assert!(
+        world.domain_error.is_some(),
+        "Se esperaba que la creación fuera rechazada por invariante"
     );
 }
 

@@ -8,27 +8,28 @@ use serde_json::json;
 use tracing::{error, info, warn};
 
 use brain_application::{
-    ApplicationError, ForgetUseCase, RecallQuery, RecallUseCase, RememberCommand, RememberUseCase,
+    ApplicationError, ExpireSessionUseCase, ForgetUseCase, RecallQuery, RecallUseCase,
+    RememberCommand, RememberUseCase,
 };
-use brain_domain::model::{MemoryId, MemoryType};
+use brain_domain::model::{MemoryId, MemoryType, ProcedureStep};
 
 use crate::protocol::{ToolCallResult, ToolDefinition};
 use crate::security::{
     format_retrieved_memories, McpPermission, McpSecurityError, McpSecurityPolicy,
 };
 
-/// Retorna la lista de definiciones de herramientas estándar expuestas por Local Brain (SRS §21).
+/// Retorna la lista de definiciones de herramientas estándar expuestas por Local Brain (SRS §21, §10).
 pub fn list_tools() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "brain_remember".to_string(),
-            description: "Registra un nuevo recuerdo o experiencia en Local Brain con persistencia local, vector de embeddings de 768 dimensiones y metadatos de procedencia (SRS §21.2).".to_string(),
+            description: "Registra un nuevo recuerdo o experiencia en Local Brain con persistencia local, vector de embeddings de 768 dimensiones, especialización cognitiva (episodic, semantic, procedural, associative, working) y metadatos de procedencia (SRS §10, §21.2).".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "content": {
                         "type": "string",
-                        "description": "Contenido textual del recuerdo a almacenar (máximo 64 KB)."
+                        "description": "Contenido textual del recuerdo a almacenar (opcional si se proveen campos especializados estructurados)."
                     },
                     "memory_type": {
                         "type": "string",
@@ -57,15 +58,70 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     },
                     "session_id": {
                         "type": "string",
-                        "description": "Identificador de sesión activa para trazabilidad de contexto."
+                        "description": "Identificador de sesión activa para trazabilidad o ciclo de vida de memoria de trabajo."
+                    },
+                    "ttl_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Tiempo de vida en segundos antes de expirar (para memorias de trabajo)."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Contexto situacional (para recuerdos episódicos especializados)."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Acción o decisión adoptada (para recuerdos episódicos especializados)."
+                    },
+                    "outcome": {
+                        "type": "string",
+                        "description": "Resultado u observación empírica obtenida (para recuerdos episódicos especializados)."
+                    },
+                    "statement": {
+                        "type": "string",
+                        "description": "Afirmación o directriz generalizada (para memoria semántica)."
+                    },
+                    "evidence_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "UUIDs de evidencias que respaldan una afirmación semántica (requerido si confianza >= 0.8)."
+                    },
+                    "domain_area": {
+                        "type": "string",
+                        "description": "Área de conocimiento (para memoria semántica)."
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "Meta u objetivo (para memorias de trabajo o procedimientos)."
+                    },
+                    "steps": {
+                        "type": "array",
+                        "description": "Secuencia ordenada de pasos técnicos (para recuerdos procedimentales)."
+                    },
+                    "source_concept": {
+                        "type": "string",
+                        "description": "Concepto o entidad de origen (para recuerdos asociativos)."
+                    },
+                    "target_concept": {
+                        "type": "string",
+                        "description": "Concepto o entidad de destino (para recuerdos asociativos)."
+                    },
+                    "predicate": {
+                        "type": "string",
+                        "description": "Predicado o relación conceptual (para recuerdos asociativos)."
+                    },
+                    "strength": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Fuerza asociativa normalizada [0.0, 1.0] (por defecto: 0.5)."
                     }
-                },
-                "required": ["content"]
+                }
             }),
         },
         ToolDefinition {
             name: "brain_recall".to_string(),
-            description: "Recupera recuerdos cognitivos relevantes mediante búsqueda semántica vectorial (768 dimensiones), ID directo o filtros básicos de proyecto/tipo (SRS §21.3).".to_string(),
+            description: "Recupera recuerdos cognitivos relevantes mediante búsqueda semántica vectorial (768 dimensiones), ID directo o filtros básicos de proyecto/tipo/sesión/concepto (SRS §21.3).".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -86,6 +142,14 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "enum": ["episodic", "semantic", "procedural", "associative", "working"],
                         "description": "Filtrar por tipo cognitivo de memoria."
                     },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Filtrar por identificador de sesión (útil para working memory activa)."
+                    },
+                    "concept": {
+                        "type": "string",
+                        "description": "Filtrar asociaciones conceptuales relacionadas con este término."
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -97,7 +161,7 @@ pub fn list_tools() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "brain_search".to_string(),
-            description: "Búsqueda avanzada multicriterio en Local Brain: permite filtrar simultáneamente por texto/semántica, proyecto, tipo, rango de fechas (ISO 8601) y umbral mínimo de importancia (SRS §21.1).".to_string(),
+            description: "Búsqueda avanzada multicriterio en Local Brain: permite filtrar simultáneamente por texto/semántica, proyecto, tipo, rango de fechas (ISO 8601), sesión, concepto y umbral mínimo de importancia (SRS §21.1).".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -113,6 +177,14 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "type": "string",
                         "enum": ["episodic", "semantic", "procedural", "associative", "working"],
                         "description": "Filtrar por tipo de memoria."
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Filtrar por identificador de sesión."
+                    },
+                    "concept": {
+                        "type": "string",
+                        "description": "Filtrar asociaciones conceptuales por término."
                     },
                     "min_importance": {
                         "type": "number",
@@ -155,6 +227,20 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 "required": ["id", "confirm"]
             }),
         },
+        ToolDefinition {
+            name: "brain_session_end".to_string(),
+            description: "Finaliza una sesión de trabajo activa en Local Brain, archivando o purgando todos los recuerdos de trabajo (working memory) temporales asociados a dicha sesión (SRS §10.1, §21.4).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Identificador de la sesión activa que finaliza."
+                    }
+                },
+                "required": ["session_id"]
+            }),
+        },
     ]
 }
 
@@ -180,40 +266,183 @@ pub async fn execute_remember(
         return ToolCallResult::error(format!("Error de seguridad: {e}"));
     }
 
-    let content = match args.get("content").and_then(|v| v.as_str()) {
-        Some(c) if !c.trim().is_empty() => c.to_string(),
-        _ => {
-            return ToolCallResult::error(
-                "El argumento 'content' es requerido y no puede estar vacío.",
-            )
-        }
-    };
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+    let agent = args
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("mcp-agent")
+        .to_string();
+    let mtype_str = args.get("memory_type").and_then(|v| v.as_str());
+    let mtype = mtype_str.and_then(parse_memory_type);
 
-    let mut cmd = RememberCommand::new(content);
+    let content_opt = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let context_opt = args
+        .get("context")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let action_opt = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let outcome_opt = args
+        .get("outcome")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
 
-    if let Some(type_str) = args.get("memory_type").and_then(|v| v.as_str()) {
-        match parse_memory_type(type_str) {
-            Some(mtype) => cmd = cmd.with_type(mtype),
-            None => {
-                return ToolCallResult::error(format!(
-                    "Tipo de memoria inválido '{type_str}'. Válidos: episodic, semantic, procedural, associative, working"
-                ));
+    let source_concept_opt = args
+        .get("source_concept")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let target_concept_opt = args
+        .get("target_concept")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let predicate_opt = args
+        .get("predicate")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+
+    let session_id_opt = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty());
+    let ttl_seconds = args.get("ttl_seconds").and_then(|v| v.as_u64());
+
+    let cmd_res: Result<RememberCommand, String> = if let (Some(ctx), Some(act), Some(out)) =
+        (context_opt, action_opt, outcome_opt)
+    {
+        RememberCommand::episodic(&project, &agent, ctx, act, out)
+            .map_err(|e| format!("Error en memoria episódica: {e}"))
+    } else if let (Some(src), Some(tgt), Some(pred)) =
+        (source_concept_opt, target_concept_opt, predicate_opt)
+    {
+        let strength = args.get("strength").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+        RememberCommand::associative(src, tgt, pred, strength)
+            .map_err(|e| format!("Error en memoria asociativa: {e}"))
+    } else if args.get("steps").is_some() {
+        let mut parsed_steps = Vec::new();
+        if let Some(steps_arr) = args.get("steps").and_then(|v| v.as_array()) {
+            for (idx, step_val) in steps_arr.iter().enumerate() {
+                let default_num = (idx + 1) as u32;
+                if let Some(desc) = step_val.as_str() {
+                    match ProcedureStep::new(default_num, desc) {
+                        Ok(step) => parsed_steps.push(step),
+                        Err(e) => {
+                            return ToolCallResult::error(format!(
+                                "Paso inválido {default_num}: {e}"
+                            ))
+                        }
+                    }
+                } else if let Some(obj) = step_val.as_object() {
+                    let num = obj
+                        .get("step_number")
+                        .and_then(|n| n.as_u64())
+                        .map(|n| n as u32)
+                        .unwrap_or(default_num);
+                    let desc = obj
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("");
+                    match ProcedureStep::new(num, desc) {
+                        Ok(mut step) => {
+                            if let Some(cmd) = obj.get("command").and_then(|c| c.as_str()) {
+                                step = step.with_command(cmd);
+                            }
+                            if let Some(act) = obj.get("action_type").and_then(|a| a.as_str()) {
+                                step = step.with_action_type(act);
+                            }
+                            parsed_steps.push(step);
+                        }
+                        Err(e) => {
+                            return ToolCallResult::error(format!("Paso inválido {num}: {e}"))
+                        }
+                    }
+                }
             }
         }
-    }
+        let name = content_opt
+            .or_else(|| args.get("name").and_then(|v| v.as_str()))
+            .unwrap_or("Procedimiento sin nombre");
+        let goal = args
+            .get("goal")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Objetivo técnico");
+        RememberCommand::procedural(name, goal, parsed_steps)
+            .map_err(|e| format!("Error en memoria procedimental: {e}"))
+    } else if mtype == Some(MemoryType::Working)
+        || (session_id_opt.is_some() && mtype.is_none() && ttl_seconds.is_some())
+    {
+        let sid = session_id_opt.unwrap_or("default-session");
+        let content = content_opt
+            .or_else(|| args.get("goal").and_then(|v| v.as_str()))
+            .unwrap_or("Memoria de trabajo");
+        RememberCommand::working(sid, content, ttl_seconds)
+            .map_err(|e| format!("Error en memoria de trabajo: {e}"))
+    } else if mtype == Some(MemoryType::Semantic) {
+        let statement = content_opt
+            .or_else(|| args.get("statement").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        if statement.trim().is_empty() {
+            return ToolCallResult::error(
+                "La memoria semántica requiere 'statement' o 'content' no vacío.",
+            );
+        }
+        let confidence = args
+            .get("confidence")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.3) as f32;
+        let mut evidence_ids = Vec::new();
+        if let Some(ev_arr) = args.get("evidence_ids").and_then(|v| v.as_array()) {
+            for ev in ev_arr {
+                if let Some(s) = ev.as_str() {
+                    match MemoryId::from_str(s) {
+                        Ok(id) => evidence_ids.push(id),
+                        Err(e) => {
+                            return ToolCallResult::error(format!(
+                                "ID de evidencia inválido '{s}': {e}"
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        RememberCommand::semantic(statement, confidence, evidence_ids)
+            .map_err(|e| format!("Error en memoria semántica: {e}"))
+    } else if let Some(content) = content_opt {
+        Ok(RememberCommand::new(content))
+    } else {
+        return ToolCallResult::error(
+                "Se requiere 'content' o parámetros especializados (episodic: context/action/outcome, associative: source/target/predicate, procedural: steps, working: session_id).",
+            );
+    };
 
-    if let Some(project) = args.get("project").and_then(|v| v.as_str()) {
+    let mut cmd = match cmd_res {
+        Ok(c) => c,
+        Err(err_msg) => return ToolCallResult::error(err_msg),
+    };
+
+    if let Some(mt) = mtype {
+        cmd = cmd.with_type(mt);
+    }
+    if args.get("project").is_some() {
         cmd = cmd.with_project(project);
     }
-
-    if let Some(agent) = args.get("agent").and_then(|v| v.as_str()) {
+    if args.get("agent").is_some() {
         cmd = cmd.with_agent(agent);
     }
-
-    if let Some(session_id) = args.get("session_id").and_then(|v| v.as_str()) {
-        cmd = cmd.with_session(session_id);
+    if let Some(sid) = session_id_opt {
+        cmd = cmd.with_session(sid);
     }
-
+    if let Some(ttl) = ttl_seconds {
+        cmd = cmd.with_ttl(ttl);
+    }
     if let Some(importance) = args.get("importance").and_then(|v| v.as_f64()) {
         if (0.0..=1.0).contains(&importance) {
             cmd = cmd.with_importance(importance as f32);
@@ -223,7 +452,6 @@ pub async fn execute_remember(
             );
         }
     }
-
     if let Some(confidence) = args.get("confidence").and_then(|v| v.as_f64()) {
         if (0.0..=1.0).contains(&confidence) {
             cmd = cmd.with_confidence(confidence as f32);
@@ -292,6 +520,14 @@ pub async fn execute_recall(
         }
     }
 
+    if let Some(session_id) = args.get("session_id").and_then(|v| v.as_str()) {
+        query.session_id = Some(session_id.to_string());
+    }
+
+    if let Some(concept) = args.get("concept").and_then(|v| v.as_str()) {
+        query.concept = Some(concept.to_string());
+    }
+
     if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
         query.limit = Some(limit as usize);
     }
@@ -338,6 +574,14 @@ pub async fn execute_search(
                 return ToolCallResult::error(format!("Tipo de memoria inválido '{type_str}'."));
             }
         }
+    }
+
+    if let Some(session_id) = args.get("session_id").and_then(|v| v.as_str()) {
+        query.session_id = Some(session_id.to_string());
+    }
+
+    if let Some(concept) = args.get("concept").and_then(|v| v.as_str()) {
+        query.concept = Some(concept.to_string());
     }
 
     if let Some(min_imp) = args.get("min_importance").and_then(|v| v.as_f64()) {
@@ -433,6 +677,45 @@ pub async fn execute_forget(
     }
 }
 
+/// Ejecuta la herramienta `brain_session_end` (SRS §10.1, §21.4).
+pub async fn execute_session_end(
+    args: serde_json::Value,
+    expire_session_uc: Option<Arc<ExpireSessionUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Write) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => {
+            return ToolCallResult::error(
+                "El argumento 'session_id' es requerido y no puede estar vacío.",
+            )
+        }
+    };
+
+    let Some(uc) = expire_session_uc else {
+        return ToolCallResult::error(
+            "El caso de uso ExpireSessionUseCase no está disponible en este servidor.",
+        );
+    };
+
+    match uc.execute(&session_id).await {
+        Ok(count) => {
+            info!(session_id = %session_id, count = count, "Sesión finalizada exitosamente vía MCP");
+            ToolCallResult::success(format!(
+                "Sesión '{session_id}' finalizada. Se archivaron/expiraron {count} recuerdo(s) de trabajo."
+            ))
+        }
+        Err(e) => {
+            error!(error = %e, "Fallo al ejecutar ExpireSessionUseCase vía MCP");
+            ToolCallResult::error(format!("Error al finalizar sesión: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +729,7 @@ mod tests {
         assert!(names.contains(&"brain_recall".to_string()));
         assert!(names.contains(&"brain_search".to_string()));
         assert!(names.contains(&"brain_forget".to_string()));
+        assert!(names.contains(&"brain_session_end".to_string()));
     }
 
     #[tokio::test]
@@ -476,6 +760,64 @@ mod tests {
         assert!(recall_res.content[0]
             .text
             .contains("Aprender Rust con Arquitectura Hexagonal"));
+    }
+
+    #[tokio::test]
+    async fn remember_specialized_episodic_and_session_lifecycle() {
+        let repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = Arc::new(RememberUseCase::new(repo.clone()));
+        let recall_uc = Arc::new(RecallUseCase::new(repo.clone()));
+        let expire_uc = Arc::new(ExpireSessionUseCase::new(repo.clone()));
+        let security = McpSecurityPolicy::new_default();
+
+        // 1. Remember episodic especializado
+        let episodic_args = json!({
+            "context": "Migración de base de datos",
+            "action": "Agregar columna expires_at",
+            "outcome": "Migración ejecutada sin downtime",
+            "project": "local-brain"
+        });
+        let res_episodic = execute_remember(episodic_args, remember_uc.clone(), &security).await;
+        assert!(!res_episodic.is_error);
+        assert!(res_episodic.content[0].text.contains("Episodic"));
+
+        // 2. Remember working memory ligado a sesión
+        let working_args = json!({
+            "memory_type": "working",
+            "session_id": "ses-mcp-1",
+            "content": "Variable temporal de refactor",
+            "ttl_seconds": 60
+        });
+        let res_work = execute_remember(working_args, remember_uc.clone(), &security).await;
+        assert!(!res_work.is_error);
+
+        // 3. Recall por sesión
+        let recall_args = json!({
+            "session_id": "ses-mcp-1"
+        });
+        let recall_res = execute_recall(recall_args, recall_uc.clone(), &security).await;
+        assert!(!recall_res.is_error);
+        assert!(recall_res.content[0]
+            .text
+            .contains("Variable temporal de refactor"));
+
+        // 4. Finalizar sesión
+        let end_args = json!({
+            "session_id": "ses-mcp-1"
+        });
+        let end_res = execute_session_end(end_args, Some(expire_uc), &security).await;
+        assert!(!end_res.is_error);
+        assert!(end_res.content[0]
+            .text
+            .contains("Se archivaron/expiraron 1 recuerdo(s)"));
+
+        // 5. Recall posterior: la memoria expirada no aparece activa
+        let recall_after =
+            execute_recall(json!({"session_id": "ses-mcp-1"}), recall_uc, &security).await;
+        assert!(!recall_after.is_error);
+        assert!(recall_after.content[0]
+            .text
+            .contains("No se encontraron recuerdos coincidentes"));
     }
 
     #[tokio::test]

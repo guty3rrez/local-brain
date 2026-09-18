@@ -200,3 +200,138 @@ fn cli_mcp_stdio_handshake() {
         ))
         .stdout(predicate::str::contains("\"name\":\"local-brain\""));
 }
+
+#[test]
+fn cli_specialized_episodic_memory() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let project = format!("cli-episodic-{tag}");
+
+    let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rem_cmd
+        .arg("remember")
+        .arg("--project")
+        .arg(&project)
+        .arg("--context")
+        .arg("Refactorización de base de datos")
+        .arg("--action")
+        .arg("Ejecutar migración 0005")
+        .arg("--outcome")
+        .arg("Columnas especializadas agregadas")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Recuerdo almacenado con éxito"))
+        .stdout(predicate::str::contains("Episodic"));
+
+    let mut rec_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rec_cmd
+        .arg("recall")
+        .arg("--project")
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Contexto: Refactorización de base de datos",
+        ))
+        .stdout(predicate::str::contains("Acción: Ejecutar migración 0005"));
+}
+
+#[test]
+fn cli_working_memory_session_lifecycle() {
+    let session_id = format!("ses-cli-{}", uuid::Uuid::new_v4());
+
+    // 1. Guardar working memory con session-id y ttl
+    let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rem_cmd
+        .arg("remember")
+        .arg("Contexto volátil de depuración")
+        .arg("--type")
+        .arg("working")
+        .arg("--session-id")
+        .arg(&session_id)
+        .arg("--ttl")
+        .arg("3600")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Recuerdo almacenado con éxito"))
+        .stdout(predicate::str::contains("Working"));
+
+    // 2. Recall por session-id
+    let mut rec_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rec_cmd
+        .arg("recall")
+        .arg("--session-id")
+        .arg(&session_id)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Encontrados 1 recuerdo(s)"))
+        .stdout(predicate::str::contains("Contexto volátil de depuración"));
+
+    // 3. Finalizar sesión
+    let mut end_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    end_cmd
+        .arg("session-end")
+        .arg(&session_id)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("finalizada exitosamente"))
+        .stdout(predicate::str::contains(
+            "Recuerdos de trabajo archivados/expirados: 1",
+        ));
+
+    // 4. Recall después de finalizar sesión: ya no debe retornar resultados
+    let mut rec_after_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rec_after_cmd
+        .arg("recall")
+        .arg("--session-id")
+        .arg(&session_id)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No se encontraron recuerdos"));
+}
+
+#[test]
+fn cli_associative_memory_creation() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let project = format!("cli-assoc-{tag}");
+
+    let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rem_cmd
+        .arg("remember")
+        .arg("--project")
+        .arg(&project)
+        .arg("--source-concept")
+        .arg("Rust")
+        .arg("--target-concept")
+        .arg("PostgreSQL")
+        .arg("--predicate")
+        .arg("persists_to")
+        .arg("--strength")
+        .arg("0.95")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Recuerdo almacenado con éxito"))
+        .stdout(predicate::str::contains("Associative"));
+
+    let mut rec_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rec_cmd
+        .arg("recall")
+        .arg("--concept")
+        .arg("Rust")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Rust --[persists_to]--> PostgreSQL",
+        ));
+}
+
+#[test]
+fn cli_purge_expired_command() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("--in-memory")
+        .arg("purge-expired")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Purga de recuerdos expirados completada exitosamente",
+        ));
+}

@@ -7,8 +7,9 @@ use thiserror::Error;
 use tracing::{info, instrument, warn};
 
 use brain_domain::model::{
-    Confidence, DomainError, Importance, Memory, MemoryContent, MemoryId, MemoryOrigin,
-    MemoryStatus, MemoryType, Provenance,
+    AssociativeMemoryData, Confidence, DomainError, EpisodicMemoryData, Importance, Memory,
+    MemoryContent, MemoryId, MemoryOrigin, MemoryStatus, MemoryType, MemoryTypeData,
+    ProceduralMemoryData, ProcedureStep, Provenance, SemanticMemoryData, WorkingMemoryData,
 };
 use brain_domain::ports::{EmbeddingProvider, MemoryRepository, VectorRepository};
 
@@ -37,6 +38,8 @@ pub struct RememberCommand {
     pub origin: Option<MemoryOrigin>,
     pub session_id: Option<String>,
     pub context_reference: Option<String>,
+    pub type_data: Option<MemoryTypeData>,
+    pub ttl_seconds: Option<u64>,
 }
 
 impl RememberCommand {
@@ -51,7 +54,103 @@ impl RememberCommand {
             origin: None,
             session_id: None,
             context_reference: None,
+            type_data: None,
+            ttl_seconds: None,
         }
+    }
+
+    pub fn working(
+        session_id: impl Into<String>,
+        content: impl Into<String>,
+        ttl_seconds: Option<u64>,
+    ) -> Result<Self, DomainError> {
+        let sid = session_id.into();
+        let mut data = WorkingMemoryData::new(sid.clone())?;
+        if let Some(ttl) = ttl_seconds {
+            data = data.with_ttl(ttl)?;
+        }
+        let txt = content.into();
+        data = data.with_goal(txt.clone());
+        let mut cmd = Self::new(txt)
+            .with_type(MemoryType::Working)
+            .with_session(sid);
+        cmd.type_data = Some(MemoryTypeData::Working(data));
+        cmd.ttl_seconds = ttl_seconds;
+        Ok(cmd)
+    }
+
+    pub fn episodic(
+        project: impl Into<String>,
+        agent: impl Into<String>,
+        context: impl Into<String>,
+        action: impl Into<String>,
+        outcome: impl Into<String>,
+    ) -> Result<Self, DomainError> {
+        let data = EpisodicMemoryData::new(
+            project.into(),
+            agent.into(),
+            context.into(),
+            action.into(),
+            outcome.into(),
+        )?;
+        let txt = data.to_content_text();
+        let mut cmd = Self::new(txt)
+            .with_type(MemoryType::Episodic)
+            .with_project(data.project.clone())
+            .with_agent(data.agent.clone());
+        cmd.type_data = Some(MemoryTypeData::Episodic(data));
+        Ok(cmd)
+    }
+
+    pub fn semantic(
+        statement: impl Into<String>,
+        confidence: f32,
+        evidence_ids: Vec<MemoryId>,
+    ) -> Result<Self, DomainError> {
+        let conf = Confidence::new(confidence)?;
+        let data = SemanticMemoryData::new(statement.into(), conf, evidence_ids)?;
+        let mut cmd = Self::new(data.statement.clone())
+            .with_type(MemoryType::Semantic)
+            .with_confidence(confidence);
+        cmd.type_data = Some(MemoryTypeData::Semantic(data));
+        Ok(cmd)
+    }
+
+    pub fn procedural(
+        name: impl Into<String>,
+        goal: impl Into<String>,
+        steps: Vec<ProcedureStep>,
+    ) -> Result<Self, DomainError> {
+        let data = ProceduralMemoryData::new(name.into(), goal.into(), steps)?;
+        let txt = data.to_content_text();
+        let mut cmd = Self::new(txt).with_type(MemoryType::Procedural);
+        cmd.type_data = Some(MemoryTypeData::Procedural(data));
+        Ok(cmd)
+    }
+
+    pub fn associative(
+        source_concept: impl Into<String>,
+        target_concept: impl Into<String>,
+        predicate: impl Into<String>,
+        strength: f32,
+    ) -> Result<Self, DomainError> {
+        let data = AssociativeMemoryData::new(source_concept, target_concept, predicate, strength)?;
+        let txt = data.to_content_text();
+        let mut cmd = Self::new(txt)
+            .with_type(MemoryType::Associative)
+            .with_importance(strength);
+        cmd.type_data = Some(MemoryTypeData::Associative(data));
+        Ok(cmd)
+    }
+
+    pub fn with_type_data(mut self, type_data: MemoryTypeData) -> Self {
+        self.type_data = Some(type_data);
+        self
+    }
+
+    pub fn with_ttl(mut self, ttl: u64) -> Self {
+        self.ttl_seconds = Some(ttl);
+        self
     }
 
     pub fn with_type(mut self, mem_type: MemoryType) -> Self {
@@ -126,23 +225,55 @@ impl RememberUseCase {
 
     #[instrument(skip(self, cmd), fields(project = ?cmd.project, mem_type = ?cmd.memory_type))]
     pub async fn execute(&self, cmd: RememberCommand) -> Result<Memory, ApplicationError> {
-        let content = MemoryContent::new(cmd.content)?;
         let mem_type = cmd.memory_type.unwrap_or(MemoryType::Episodic);
         let origin = cmd.origin.unwrap_or(MemoryOrigin::Observation);
 
         let mut provenance = Provenance::new(origin);
-        if let Some(agent) = cmd.agent {
+        if let Some(agent) = cmd.agent.clone() {
             provenance = provenance.with_agent(agent);
         }
-        if let Some(session_id) = cmd.session_id {
+        if let Some(session_id) = cmd.session_id.clone() {
             provenance = provenance.with_session(session_id);
         }
         if let Some(ctx) = cmd.context_reference {
             provenance = provenance.with_context(ctx);
         }
 
-        let mut memory = Memory::new(content, mem_type, provenance);
-        memory.project = cmd.project;
+        let mut memory = match cmd.type_data {
+            Some(MemoryTypeData::Working(w)) => Memory::new_working_specialized(w, provenance)?,
+            Some(MemoryTypeData::Episodic(e)) => {
+                let imp = cmd.importance.map(Importance::new).transpose()?;
+                Memory::new_episodic_specialized(e, provenance, imp)?
+            }
+            Some(MemoryTypeData::Semantic(s)) => {
+                let conf = match cmd.confidence {
+                    Some(c) => Confidence::new(c)?,
+                    None => Confidence::default(),
+                };
+                Memory::new_semantic_specialized(s, conf, provenance)?
+            }
+            Some(MemoryTypeData::Procedural(p)) => {
+                Memory::new_procedural_specialized(p, provenance)?
+            }
+            Some(MemoryTypeData::Associative(a)) => {
+                Memory::new_associative_specialized(a, provenance)?
+            }
+            Some(MemoryTypeData::Generic) | None => {
+                let content = MemoryContent::new(cmd.content)?;
+                let mut mem = Memory::new(content, mem_type, provenance);
+                if let Some(ttl) = cmd.ttl_seconds {
+                    mem.expires_at = Some(mem.created_at + chrono::Duration::seconds(ttl as i64));
+                }
+                mem
+            }
+        };
+
+        if memory.project.is_none() {
+            memory.project = cmd.project;
+        }
+        if memory.agent.is_none() {
+            memory.agent = cmd.agent;
+        }
 
         if let Some(imp_val) = cmd.importance {
             memory.importance = Importance::new(imp_val)?;
@@ -204,6 +335,8 @@ pub struct RecallQuery {
     pub min_importance: Option<f32>,
     pub from_date: Option<DateTime<Utc>>,
     pub to_date: Option<DateTime<Utc>>,
+    pub session_id: Option<String>,
+    pub concept: Option<String>,
     pub limit: Option<usize>,
 }
 
@@ -229,6 +362,20 @@ impl RecallQuery {
         }
     }
 
+    pub fn by_session(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: Some(session_id.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn by_concept(concept: impl Into<String>) -> Self {
+        Self {
+            concept: Some(concept.into()),
+            ..Default::default()
+        }
+    }
+
     pub fn with_query(mut self, query: impl Into<String>) -> Self {
         self.query = Some(query.into());
         self
@@ -236,6 +383,16 @@ impl RecallQuery {
 
     pub fn with_type(mut self, mem_type: MemoryType) -> Self {
         self.memory_type = Some(mem_type);
+        self
+    }
+
+    pub fn with_session(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    pub fn with_concept(mut self, concept: impl Into<String>) -> Self {
+        self.concept = Some(concept.into());
         self
     }
 
@@ -354,6 +511,23 @@ impl RecallUseCase {
                 }
             }
             list
+        } else if let Some(ref session_id) = query.session_id {
+            let mut mems = self
+                .repository
+                .find_active_by_session(session_id, limit)
+                .await?;
+            for mem in &mut mems {
+                mem.mark_retrieved();
+                let _ = self.repository.update(mem).await;
+            }
+            mems
+        } else if let Some(ref concept) = query.concept {
+            let mut mems = self.repository.find_associations(concept, limit).await?;
+            for mem in &mut mems {
+                mem.mark_retrieved();
+                let _ = self.repository.update(mem).await;
+            }
+            mems
         } else if let Some(ref project) = query.project {
             let mut mems = self.repository.find_by_project(project, limit).await?;
             if let Some(mtype) = query.memory_type {
@@ -399,6 +573,7 @@ impl RecallUseCase {
             ));
         };
 
+        memories.retain(|m| m.is_active());
         if let Some(min_imp) = query.min_importance {
             memories.retain(|m| m.importance.value() >= min_imp);
         }
@@ -411,6 +586,51 @@ impl RecallUseCase {
         memories.truncate(limit);
 
         Ok(memories)
+    }
+}
+
+/// Caso de Uso: Finalizar sesión activa y archivar sus memorias de trabajo (SRS §10.1, F4-01).
+#[derive(Clone)]
+pub struct ExpireSessionUseCase {
+    repository: Arc<dyn MemoryRepository>,
+}
+
+impl ExpireSessionUseCase {
+    pub fn new(repository: Arc<dyn MemoryRepository>) -> Self {
+        Self { repository }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn execute(&self, session_id: &str) -> Result<usize, ApplicationError> {
+        let count = self.repository.expire_session(session_id).await?;
+        info!(
+            session_id = %session_id,
+            count,
+            "Sesión de trabajo finalizada y memorias archivadas"
+        );
+        Ok(count)
+    }
+}
+
+/// Caso de Uso: Archivar de forma masiva todas las memorias con TTL vencido (SRS §10.1, F4-01).
+#[derive(Clone)]
+pub struct PurgeExpiredUseCase {
+    repository: Arc<dyn MemoryRepository>,
+}
+
+impl PurgeExpiredUseCase {
+    pub fn new(repository: Arc<dyn MemoryRepository>) -> Self {
+        Self { repository }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn execute(&self) -> Result<usize, ApplicationError> {
+        let count = self.repository.purge_expired().await?;
+        info!(
+            count,
+            "Memorias vencidas por TTL purgadas y archivadas exitosamente"
+        );
+        Ok(count)
     }
 }
 
@@ -726,5 +946,113 @@ mod tests {
         let results = recall_uc.execute(query).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].content.text(), "Memoria crítica");
+    }
+
+    #[tokio::test]
+    async fn remember_and_recall_specialized_memory_types() {
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = RememberUseCase::new(mem_repo.clone());
+        let recall_uc = RecallUseCase::new(mem_repo.clone());
+        let expire_session_uc = ExpireSessionUseCase::new(mem_repo.clone());
+
+        // 1. Episodic
+        let ep_cmd = RememberCommand::episodic(
+            "local-brain",
+            "antigravity",
+            "Testing de arquitectura",
+            "Ejecutar tests puros",
+            "100% de éxito en milisegundos",
+        )
+        .unwrap();
+        let ep_mem = remember_uc.execute(ep_cmd).await.unwrap();
+        assert_eq!(ep_mem.memory_type, MemoryType::Episodic);
+        assert_eq!(ep_mem.project.as_deref(), Some("local-brain"));
+
+        // 2. Semantic
+        let sem_cmd = RememberCommand::semantic(
+            "Arquitectura Hexagonal desacopla infraestructura del dominio",
+            0.9,
+            vec![ep_mem.id],
+        )
+        .unwrap();
+        let sem_mem = remember_uc.execute(sem_cmd).await.unwrap();
+        assert_eq!(sem_mem.memory_type, MemoryType::Semantic);
+
+        // 3. Procedural
+        let steps = vec![
+            ProcedureStep::new(1, "Escribir test").unwrap(),
+            ProcedureStep::new(2, "Implementar código").unwrap(),
+            ProcedureStep::new(3, "Refactorizar").unwrap(),
+        ];
+        let proc_cmd =
+            RememberCommand::procedural("TDD Cycle", "Ciclo Red-Green-Refactor", steps).unwrap();
+        let proc_mem = remember_uc.execute(proc_cmd).await.unwrap();
+        assert_eq!(proc_mem.memory_type, MemoryType::Procedural);
+
+        // 4. Associative y consulta por concepto
+        let assoc_cmd =
+            RememberCommand::associative("PostgreSQL", "pgvector", "extends_with", 0.95).unwrap();
+        remember_uc.execute(assoc_cmd).await.unwrap();
+
+        let assoc_results = recall_uc
+            .execute(RecallQuery::by_concept("pgvector"))
+            .await
+            .unwrap();
+        assert_eq!(assoc_results.len(), 1);
+
+        // 5. Working Memory con sesión y TTL
+        let work_cmd =
+            RememberCommand::working("sess-xyz", "Investigar latencia", Some(3600)).unwrap();
+        let work_mem = remember_uc.execute(work_cmd).await.unwrap();
+        assert_eq!(work_mem.memory_type, MemoryType::Working);
+        assert!(work_mem.expires_at.is_some());
+
+        // Recall by session
+        let session_results = recall_uc
+            .execute(RecallQuery::by_session("sess-xyz"))
+            .await
+            .unwrap();
+        assert_eq!(session_results.len(), 1);
+
+        // Expire session
+        let expired_count = expire_session_uc.execute("sess-xyz").await.unwrap();
+        assert_eq!(expired_count, 1);
+
+        // Tras expirar la sesión, no debe aparecer en recall activo
+        let session_after = recall_uc
+            .execute(RecallQuery::by_session("sess-xyz"))
+            .await
+            .unwrap();
+        assert!(session_after.is_empty());
+    }
+
+    #[tokio::test]
+    async fn purge_expired_use_case_cleans_expired_memories() {
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = RememberUseCase::new(mem_repo.clone());
+        let recall_uc = RecallUseCase::new(mem_repo.clone());
+        let purge_uc = PurgeExpiredUseCase::new(mem_repo.clone());
+
+        // Crear memoria de trabajo
+        let cmd = RememberCommand::working("sess-abc", "Hipótesis corta", Some(60)).unwrap();
+        let mut mem = remember_uc.execute(cmd).await.unwrap();
+
+        // Forzar fecha de expiración en el pasado
+        mem.expires_at = Some(Utc::now() - chrono::Duration::seconds(5));
+        mem_repo.update(&mem).await.unwrap();
+
+        // Recall no la debe retornar porque is_active() la descarta
+        let results = recall_uc
+            .execute(RecallQuery::by_session("sess-abc"))
+            .await
+            .unwrap();
+        assert!(results.is_empty());
+
+        // PurgeExpiredUseCase la archiva formalmente
+        let purged = purge_uc.execute().await.unwrap();
+        assert_eq!(purged, 1);
+
+        let saved = mem_repo.find_by_id(&mem.id).await.unwrap().unwrap();
+        assert_eq!(saved.status, MemoryStatus::Archived);
     }
 }

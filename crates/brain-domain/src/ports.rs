@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::model::{DomainError, Memory, MemoryId, MemoryStatus, MemoryType};
+use crate::model::{DomainError, Memory, MemoryId, MemoryStatus, MemoryType, MemoryTypeData};
 
 /// Puerto secundario para persistencia de unidades de memoria cognitiva (SRS §8, §9).
 #[async_trait]
@@ -34,6 +34,26 @@ pub trait MemoryRepository: Send + Sync {
     async fn find_by_status(
         &self,
         status: MemoryStatus,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError>;
+
+    /// Recupera memorias de trabajo activas asociadas a una sesión (excluye expiradas por TTL).
+    async fn find_active_by_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError>;
+
+    /// Archiva todas las memorias de trabajo activas ligadas a una sesión dada.
+    async fn expire_session(&self, session_id: &str) -> Result<usize, DomainError>;
+
+    /// Archiva de forma masiva todas las memorias cuyo TTL haya vencido.
+    async fn purge_expired(&self) -> Result<usize, DomainError>;
+
+    /// Recupera memorias asociativas donde el concepto origen o destino coincide con el indicado.
+    async fn find_associations(
+        &self,
+        concept: &str,
         limit: usize,
     ) -> Result<Vec<Memory>, DomainError>;
 
@@ -319,6 +339,99 @@ impl MemoryRepository for InMemoryMemoryRepository {
         Ok(())
     }
 
+    async fn find_active_by_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError> {
+        let lock = self
+            .storage
+            .read()
+            .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+        let results: Vec<Memory> = lock
+            .values()
+            .filter(|m| {
+                m.is_active()
+                    && m.memory_type == MemoryType::Working
+                    && m.source.session_id.as_deref() == Some(session_id)
+            })
+            .take(limit)
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+
+    async fn expire_session(&self, session_id: &str) -> Result<usize, DomainError> {
+        let mut lock = self
+            .storage
+            .write()
+            .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+        let mut count = 0;
+        for memory in lock.values_mut() {
+            if memory.memory_type == MemoryType::Working
+                && memory.source.session_id.as_deref() == Some(session_id)
+                && matches!(
+                    memory.status,
+                    MemoryStatus::Active | MemoryStatus::PendingEmbedding
+                )
+            {
+                memory.archive()?;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    async fn purge_expired(&self) -> Result<usize, DomainError> {
+        let now = chrono::Utc::now();
+        let mut lock = self
+            .storage
+            .write()
+            .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+        let mut count = 0;
+        for memory in lock.values_mut() {
+            if memory.is_expired_at(now)
+                && matches!(
+                    memory.status,
+                    MemoryStatus::Active | MemoryStatus::PendingEmbedding
+                )
+            {
+                memory.archive()?;
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    async fn find_associations(
+        &self,
+        concept: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError> {
+        let target = concept.to_lowercase();
+        let lock = self
+            .storage
+            .read()
+            .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+        let results: Vec<Memory> = lock
+            .values()
+            .filter(|m| {
+                if !m.is_active() || m.memory_type != MemoryType::Associative {
+                    return false;
+                }
+                if let MemoryTypeData::Associative(ref data) = m.type_data {
+                    data.source_concept.to_lowercase() == target
+                        || data.target_concept.to_lowercase() == target
+                } else {
+                    false
+                }
+            })
+            .take(limit)
+            .cloned()
+            .collect();
+        Ok(results)
+    }
+
     async fn soft_delete(&self, id: &MemoryId) -> Result<(), DomainError> {
         let mut lock = self
             .storage
@@ -339,7 +452,10 @@ impl MemoryRepository for InMemoryMemoryRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{MemoryContent, MemoryOrigin, MemoryStatus, Provenance};
+    use crate::model::{
+        AssociativeMemoryData, MemoryContent, MemoryOrigin, MemoryStatus, Provenance,
+        WorkingMemoryData,
+    };
 
     #[tokio::test]
     async fn in_memory_repository_crud_operations() {
@@ -432,5 +548,73 @@ mod tests {
         let provider = InMemoryEmbeddingProvider::new();
         let result = provider.embed("   ").await;
         assert_eq!(result, Err(DomainError::EmptyContent));
+    }
+
+    #[tokio::test]
+    async fn in_memory_session_and_expiration_lifecycle() {
+        let repo = InMemoryMemoryRepository::new();
+        let prov = Provenance::new(MemoryOrigin::Observation);
+
+        // Crear dos memorias de trabajo para la sesión sess-123 (una activa, una expirada)
+        let working_active = WorkingMemoryData::new("sess-123")
+            .unwrap()
+            .with_goal("Resolver bug A")
+            .with_ttl(3600)
+            .unwrap();
+        let mem_active = Memory::new_working_specialized(working_active, prov.clone()).unwrap();
+
+        let working_expired = WorkingMemoryData::new("sess-123")
+            .unwrap()
+            .with_goal("Hipótesis descartada");
+        let mut mem_expired =
+            Memory::new_working_specialized(working_expired, prov.clone()).unwrap();
+        // Forzar expiración simulada en el pasado
+        mem_expired.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(10));
+
+        repo.save(&mem_active).await.unwrap();
+        repo.save(&mem_expired).await.unwrap();
+
+        // 1. find_active_by_session solo debe retornar la activa
+        let active_mems = repo.find_active_by_session("sess-123", 10).await.unwrap();
+        assert_eq!(active_mems.len(), 1);
+        assert_eq!(active_mems[0].id, mem_active.id);
+
+        // 2. purge_expired debe archivar la memoria vencida
+        let purged = repo.purge_expired().await.unwrap();
+        assert_eq!(purged, 1);
+        let refetched_expired = repo.find_by_id(&mem_expired.id).await.unwrap().unwrap();
+        assert_eq!(refetched_expired.status, MemoryStatus::Archived);
+
+        // 3. expire_session debe archivar las restantes de la sesión
+        let expired_count = repo.expire_session("sess-123").await.unwrap();
+        assert_eq!(expired_count, 1);
+        let refetched_active = repo.find_by_id(&mem_active.id).await.unwrap().unwrap();
+        assert_eq!(refetched_active.status, MemoryStatus::Archived);
+    }
+
+    #[tokio::test]
+    async fn in_memory_associations_search() {
+        let repo = InMemoryMemoryRepository::new();
+        let prov = Provenance::new(MemoryOrigin::Observation);
+
+        let assoc1 =
+            AssociativeMemoryData::new("Rust", "PostgreSQL", "integrates_with", 0.9).unwrap();
+        let assoc2 = AssociativeMemoryData::new("Flutter", "Rust", "uses_via_ffi", 0.8).unwrap();
+        let assoc3 = AssociativeMemoryData::new("Python", "FastAPI", "framework", 0.95).unwrap();
+
+        let mem1 = Memory::new_associative_specialized(assoc1, prov.clone()).unwrap();
+        let mem2 = Memory::new_associative_specialized(assoc2, prov.clone()).unwrap();
+        let mem3 = Memory::new_associative_specialized(assoc3, prov.clone()).unwrap();
+
+        repo.save(&mem1).await.unwrap();
+        repo.save(&mem2).await.unwrap();
+        repo.save(&mem3).await.unwrap();
+
+        // Buscar asociaciones para "rust" (tanto origen como destino, insensible a mayúsculas)
+        let rust_assocs = repo.find_associations("rust", 10).await.unwrap();
+        assert_eq!(rust_assocs.len(), 2);
+
+        let python_assocs = repo.find_associations("FastAPI", 10).await.unwrap();
+        assert_eq!(python_assocs.len(), 1);
     }
 }

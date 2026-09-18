@@ -5,7 +5,7 @@ use sqlx::{PgPool, Row};
 
 use brain_domain::model::{
     Confidence, DomainError, Importance, Memory, MemoryContent, MemoryId, MemoryStatus, MemoryType,
-    Provenance, Utility, Version,
+    MemoryTypeData, Provenance, Utility, Version,
 };
 use brain_domain::ports::{MemoryRepository, VectorRepository};
 use pgvector::Vector;
@@ -45,6 +45,9 @@ impl MemoryRepository for PostgresMemoryRepository {
         let provenance_json = serde_json::to_value(&memory.source).map_err(|e| {
             DomainError::RepositoryError(format!("Error al serializar provenance: {e}"))
         })?;
+        let metadata_json = serde_json::to_value(&memory.type_data).map_err(|e| {
+            DomainError::RepositoryError(format!("Error al serializar type_data metadata: {e}"))
+        })?;
         let pg_vector = memory.embedding.as_ref().map(|v| Vector::from(v.clone()));
 
         let result = sqlx::query(
@@ -53,12 +56,12 @@ impl MemoryRepository for PostgresMemoryRepository {
                 id, memory_type, content_text, content_hash, summary,
                 project, agent, importance, confidence, utility,
                 status, version, provenance, metadata, created_at,
-                updated_at, last_retrieved_at, embedding
+                updated_at, last_retrieved_at, embedding, expires_at
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15,
-                $16, $17, $18
+                $16, $17, $18, $19
             )
             "#,
         )
@@ -75,11 +78,12 @@ impl MemoryRepository for PostgresMemoryRepository {
         .bind(memory_status_to_str(memory.status))
         .bind(memory.version.value() as i32)
         .bind(provenance_json)
-        .bind(serde_json::json!({}))
+        .bind(metadata_json)
         .bind(memory.created_at)
         .bind(memory.updated_at)
         .bind(memory.last_retrieved_at)
         .bind(pg_vector)
+        .bind(memory.expires_at)
         .execute(&self.pool)
         .await;
 
@@ -101,7 +105,7 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at, embedding
+                   updated_at, last_retrieved_at, embedding, expires_at
             FROM memories
             WHERE id = $1
             "#,
@@ -127,9 +131,10 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at, embedding
+                   updated_at, last_retrieved_at, embedding, expires_at
             FROM memories
             WHERE project = $1 AND status NOT IN ('soft_deleted', 'archived')
+              AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY created_at DESC
             LIMIT $2
             "#,
@@ -157,9 +162,10 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at, embedding
+                   updated_at, last_retrieved_at, embedding, expires_at
             FROM memories
             WHERE memory_type = $1 AND status NOT IN ('soft_deleted', 'archived')
+              AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY created_at DESC
             LIMIT $2
             "#,
@@ -185,7 +191,7 @@ impl MemoryRepository for PostgresMemoryRepository {
             SELECT id, memory_type, content_text, content_hash, summary,
                    project, agent, importance, confidence, utility,
                    status, version, provenance, metadata, created_at,
-                   updated_at, last_retrieved_at, embedding
+                   updated_at, last_retrieved_at, embedding, expires_at
             FROM memories
             WHERE status = $1
             ORDER BY created_at ASC
@@ -206,9 +212,126 @@ impl MemoryRepository for PostgresMemoryRepository {
         rows.into_iter().map(row_to_memory).collect()
     }
 
+    async fn find_active_by_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, memory_type, content_text, content_hash, summary,
+                   project, agent, importance, confidence, utility,
+                   status, version, provenance, metadata, created_at,
+                   updated_at, last_retrieved_at, embedding, expires_at
+            FROM memories
+            WHERE provenance->>'session_id' = $1
+              AND memory_type = 'working'
+              AND status NOT IN ('soft_deleted', 'archived')
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(session_id)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!(
+                "Error al buscar memorias de sesión {session_id}: {e}"
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_memory).collect()
+    }
+
+    async fn expire_session(&self, session_id: &str) -> Result<usize, DomainError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE memories SET
+                status = 'archived',
+                updated_at = NOW()
+            WHERE provenance->>'session_id' = $1
+              AND memory_type = 'working'
+              AND status NOT IN ('soft_deleted', 'archived')
+            "#,
+        )
+        .bind(session_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!(
+                "Error al archivar sesión de trabajo {session_id}: {e}"
+            ))
+        })?;
+
+        Ok(result.rows_affected() as usize)
+    }
+
+    async fn purge_expired(&self) -> Result<usize, DomainError> {
+        let result = sqlx::query(
+            r#"
+            UPDATE memories SET
+                status = 'archived',
+                updated_at = NOW()
+            WHERE expires_at IS NOT NULL
+              AND expires_at <= NOW()
+              AND status NOT IN ('soft_deleted', 'archived')
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!("Error al purgar memorias vencidas: {e}"))
+        })?;
+
+        Ok(result.rows_affected() as usize)
+    }
+
+    async fn find_associations(
+        &self,
+        concept: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, DomainError> {
+        let pattern = format!("%{concept}%");
+        let rows = sqlx::query(
+            r#"
+            SELECT id, memory_type, content_text, content_hash, summary,
+                   project, agent, importance, confidence, utility,
+                   status, version, provenance, metadata, created_at,
+                   updated_at, last_retrieved_at, embedding, expires_at
+            FROM memories
+            WHERE memory_type = 'associative'
+              AND status NOT IN ('soft_deleted', 'archived')
+              AND (
+                  metadata->'associative'->>'source_concept' ILIKE $1
+                  OR metadata->'associative'->>'target_concept' ILIKE $1
+                  OR metadata->>'source_concept' ILIKE $1
+                  OR metadata->>'target_concept' ILIKE $1
+              )
+            ORDER BY created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(pattern)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!(
+                "Error al buscar asociaciones para '{concept}': {e}"
+            ))
+        })?;
+
+        rows.into_iter().map(row_to_memory).collect()
+    }
+
     async fn update(&self, memory: &Memory) -> Result<(), DomainError> {
         let provenance_json = serde_json::to_value(&memory.source).map_err(|e| {
             DomainError::RepositoryError(format!("Error al serializar provenance: {e}"))
+        })?;
+        let metadata_json = serde_json::to_value(&memory.type_data).map_err(|e| {
+            DomainError::RepositoryError(format!("Error al serializar type_data metadata: {e}"))
         })?;
         let pg_vector = memory.embedding.as_ref().map(|v| Vector::from(v.clone()));
 
@@ -227,9 +350,11 @@ impl MemoryRepository for PostgresMemoryRepository {
                 status = $11,
                 version = $12,
                 provenance = $13,
-                updated_at = $14,
-                last_retrieved_at = $15,
-                embedding = $16
+                metadata = $14,
+                updated_at = $15,
+                last_retrieved_at = $16,
+                embedding = $17,
+                expires_at = $18
             WHERE id = $1
             "#,
         )
@@ -246,9 +371,11 @@ impl MemoryRepository for PostgresMemoryRepository {
         .bind(memory_status_to_str(memory.status))
         .bind(memory.version.value() as i32)
         .bind(provenance_json)
+        .bind(metadata_json)
         .bind(memory.updated_at)
         .bind(memory.last_retrieved_at)
         .bind(pg_vector)
+        .bind(memory.expires_at)
         .execute(&self.pool)
         .await
         .map_err(|e| {
@@ -342,6 +469,7 @@ impl VectorRepository for PostgresMemoryRepository {
             SELECT id, (1.0 - (embedding <=> $1)) AS similarity
             FROM memories
             WHERE status = 'active' AND embedding IS NOT NULL
+              AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY embedding <=> $1 ASC
             LIMIT $2
             "#,
@@ -455,6 +583,7 @@ fn row_to_memory(row: sqlx::postgres::PgRow) -> Result<Memory, DomainError> {
     let provenance_val: serde_json::Value = row
         .try_get("provenance")
         .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+    let metadata_val: serde_json::Value = row.try_get("metadata").unwrap_or(serde_json::json!({}));
     let created_at: chrono::DateTime<chrono::Utc> = row
         .try_get("created_at")
         .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
@@ -464,6 +593,8 @@ fn row_to_memory(row: sqlx::postgres::PgRow) -> Result<Memory, DomainError> {
     let last_retrieved_at: Option<chrono::DateTime<chrono::Utc>> = row
         .try_get("last_retrieved_at")
         .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+    let expires_at: Option<chrono::DateTime<chrono::Utc>> =
+        row.try_get("expires_at").unwrap_or(None);
 
     let memory_type = parse_memory_type(&memory_type_str)?;
     let status = parse_memory_status(&status_str)?;
@@ -481,6 +612,9 @@ fn row_to_memory(row: sqlx::postgres::PgRow) -> Result<Memory, DomainError> {
             "Error al deserializar provenance de memoria {id}: {e}"
         ))
     })?;
+
+    let type_data: MemoryTypeData =
+        serde_json::from_value(metadata_val).unwrap_or(MemoryTypeData::Generic);
 
     Ok(Memory {
         id: MemoryId::from_uuid(id),
@@ -503,5 +637,7 @@ fn row_to_memory(row: sqlx::postgres::PgRow) -> Result<Memory, DomainError> {
             .ok()
             .flatten()
             .map(|v| v.to_vec()),
+        type_data,
+        expires_at,
     })
 }
