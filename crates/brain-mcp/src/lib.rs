@@ -5,7 +5,14 @@
 //! Expone herramientas de memoria (`brain_remember`, `brain_recall`, `brain_search`)
 //! para agentes de IA (Claude Code, Codex, Antigravity, Cursor) sobre stdio y SSE.
 
-pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+pub mod protocol;
+pub mod security;
+pub mod server;
+pub mod tools;
+
+pub use protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, MCP_PROTOCOL_VERSION};
+pub use security::{McpPermission, McpSecurityPolicy};
+pub use server::McpServer;
 
 #[cfg(test)]
 mod tests {

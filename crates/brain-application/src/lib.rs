@@ -8,6 +8,6 @@
 pub mod use_cases;
 
 pub use use_cases::{
-    ApplicationError, EmbedPendingUseCase, RecallQuery, RecallUseCase, RememberCommand,
-    RememberUseCase,
+    ApplicationError, EmbedPendingUseCase, ForgetUseCase, RecallQuery, RecallUseCase,
+    RememberCommand, RememberUseCase,
 };

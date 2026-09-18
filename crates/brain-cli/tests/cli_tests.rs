@@ -172,3 +172,31 @@ async fn cli_semantic_recall_with_mock_provider() {
         .stdout(predicate::str::contains("Encontrados 1 recuerdo(s)"))
         .stdout(predicate::str::contains(&content));
 }
+
+#[test]
+fn cli_mcp_help_command() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("mcp")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Model Context Protocol (MCP)"))
+        .stdout(predicate::str::contains("--read-only"))
+        .stdout(predicate::str::contains("--allow-delete"));
+}
+
+#[test]
+fn cli_mcp_stdio_handshake() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    let init_json = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n";
+
+    cmd.arg("--in-memory")
+        .arg("mcp")
+        .write_stdin(init_json)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"protocolVersion\":\"2024-11-05\"",
+        ))
+        .stdout(predicate::str::contains("\"name\":\"local-brain\""));
+}

@@ -10,7 +10,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sqlx::Row;
 
 use brain_application::{
-    EmbedPendingUseCase, RecallQuery, RecallUseCase, RememberCommand, RememberUseCase,
+    EmbedPendingUseCase, ForgetUseCase, RecallQuery, RecallUseCase, RememberCommand,
+    RememberUseCase,
 };
 use brain_core::CORE_VERSION;
 use brain_domain::model::{DomainError, MemoryId, MemoryStatus, MemoryType};
@@ -20,6 +21,7 @@ use brain_domain::ports::{
 };
 use brain_infrastructure::embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
 use brain_infrastructure::PostgresMemoryRepository;
+use brain_mcp::{McpSecurityPolicy, McpServer};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -61,6 +63,20 @@ enum Commands {
 
     /// Muestra el estado del sistema, diagnóstico de persistencia, pgvector y llama.cpp
     Status,
+
+    /// Inicia el servidor Model Context Protocol (MCP) sobre stdio para agentes de IA (SRS §21, §31, §32)
+    Mcp(McpArgs),
+}
+
+#[derive(Args, Debug)]
+struct McpArgs {
+    /// Iniciar en modo solo lectura (deshabilita operaciones de escritura y borrado)
+    #[arg(long)]
+    read_only: bool,
+
+    /// Permitir operaciones de borrado explícito mediante brain_forget (SRS §31)
+    #[arg(long, default_value_t = true)]
+    allow_delete: bool,
 }
 
 #[derive(Args, Debug)]
@@ -536,6 +552,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             } else {
                 println!("⚠️ No se pudo inicializar cliente HTTP");
+            }
+        }
+
+        Commands::Mcp(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let remember_uc = Arc::new(RememberUseCase::with_embedding(
+                ctx.memory_repo.clone(),
+                ctx.embedding_provider.clone(),
+                ctx.vector_repo.clone(),
+            ));
+            let recall_uc = Arc::new(RecallUseCase::with_embedding(
+                ctx.memory_repo.clone(),
+                ctx.embedding_provider.clone(),
+                ctx.vector_repo.clone(),
+            ));
+            let forget_uc = Arc::new(ForgetUseCase::new(ctx.memory_repo.clone()));
+
+            let security = if args.read_only {
+                McpSecurityPolicy::new_read_only()
+            } else if args.allow_delete {
+                McpSecurityPolicy::new_full()
+            } else {
+                McpSecurityPolicy::new_default()
+            };
+
+            let server = McpServer::new(remember_uc, recall_uc, forget_uc, security);
+            if let Err(e) = server.run_stdio().await {
+                eprintln!("❌ Error en servidor MCP: {e}");
+                std::process::exit(1);
             }
         }
     }

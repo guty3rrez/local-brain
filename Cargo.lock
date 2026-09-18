@@ -176,6 +176,7 @@ dependencies = [
  "async-trait",
  "brain-core",
  "brain-domain",
+ "chrono",
  "rstest",
  "serde",
  "thiserror 2.0.20",
@@ -192,6 +193,7 @@ dependencies = [
  "brain-core",
  "brain-domain",
  "brain-infrastructure",
+ "brain-mcp",
  "clap",
  "predicates",
  "reqwest",
@@ -252,14 +254,19 @@ dependencies = [
 name = "brain-mcp"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "brain-application",
  "brain-core",
  "brain-domain",
+ "chrono",
+ "cucumber",
+ "rstest",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

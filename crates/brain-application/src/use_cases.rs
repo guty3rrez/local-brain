@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 use tracing::{info, instrument, warn};
 
@@ -200,6 +201,9 @@ pub struct RecallQuery {
     pub memory_type: Option<MemoryType>,
     pub query: Option<String>,
     pub min_similarity: Option<f32>,
+    pub min_importance: Option<f32>,
+    pub from_date: Option<DateTime<Utc>>,
+    pub to_date: Option<DateTime<Utc>>,
     pub limit: Option<usize>,
 }
 
@@ -237,6 +241,21 @@ impl RecallQuery {
 
     pub fn with_min_similarity(mut self, min_sim: f32) -> Self {
         self.min_similarity = Some(min_sim);
+        self
+    }
+
+    pub fn with_min_importance(mut self, min_imp: f32) -> Self {
+        self.min_importance = Some(min_imp);
+        self
+    }
+
+    pub fn with_from_date(mut self, from: DateTime<Utc>) -> Self {
+        self.from_date = Some(from);
+        self
+    }
+
+    pub fn with_to_date(mut self, to: DateTime<Utc>) -> Self {
+        self.to_date = Some(to);
         self
     }
 
@@ -279,15 +298,15 @@ impl RecallUseCase {
     pub async fn execute(&self, query: RecallQuery) -> Result<Vec<Memory>, ApplicationError> {
         let limit = query.limit.unwrap_or(10);
 
-        if let Some(id) = query.id {
+        let mut memories = if let Some(id) = query.id {
             let maybe_mem = self.repository.find_by_id(&id).await?;
             match maybe_mem {
                 Some(mut memory) if memory.is_active() => {
                     memory.mark_retrieved();
                     let _ = self.repository.update(&memory).await;
-                    Ok(vec![memory])
+                    vec![memory]
                 }
-                _ => Err(ApplicationError::NotFound(id)),
+                _ => return Err(ApplicationError::NotFound(id)),
             }
         } else if let Some(ref text_query) = query.query {
             let (provider, vector_repo) = match (&self.embedding_provider, &self.vector_repository)
@@ -301,9 +320,14 @@ impl RecallUseCase {
             };
 
             let query_vec = provider.embed(text_query).await?;
-            let similar_pairs = vector_repo.search_similar(&query_vec, limit).await?;
+            let fetch_limit = if query.project.is_some() || query.memory_type.is_some() {
+                (limit * 5).max(50)
+            } else {
+                limit
+            };
+            let similar_pairs = vector_repo.search_similar(&query_vec, fetch_limit).await?;
 
-            let mut memories = Vec::new();
+            let mut list = Vec::new();
             for (id, similarity) in similar_pairs {
                 if let Some(min_sim) = query.min_similarity {
                     if similarity < min_sim {
@@ -326,31 +350,91 @@ impl RecallUseCase {
                     }
                     mem.mark_retrieved();
                     let _ = self.repository.update(&mem).await;
-                    memories.push(mem);
+                    list.push(mem);
                 }
             }
-            Ok(memories)
+            list
         } else if let Some(ref project) = query.project {
-            let mut memories = self.repository.find_by_project(project, limit).await?;
+            let mut mems = self.repository.find_by_project(project, limit).await?;
             if let Some(mtype) = query.memory_type {
-                memories.retain(|m| m.memory_type == mtype);
+                mems.retain(|m| m.memory_type == mtype);
             }
-            for mem in &mut memories {
+            for mem in &mut mems {
                 mem.mark_retrieved();
                 let _ = self.repository.update(mem).await;
             }
-            Ok(memories)
+            mems
         } else if let Some(mtype) = query.memory_type {
-            let mut memories = self.repository.find_by_type(mtype, limit).await?;
-            for mem in &mut memories {
+            let mut mems = self.repository.find_by_type(mtype, limit).await?;
+            for mem in &mut mems {
                 mem.mark_retrieved();
                 let _ = self.repository.update(mem).await;
             }
-            Ok(memories)
+            mems
+        } else if query.from_date.is_some()
+            || query.to_date.is_some()
+            || query.min_importance.is_some()
+        {
+            let mut all_memories = Vec::new();
+            for mtype in [
+                MemoryType::Episodic,
+                MemoryType::Semantic,
+                MemoryType::Procedural,
+                MemoryType::Associative,
+                MemoryType::Working,
+            ] {
+                if let Ok(mut mems) = self.repository.find_by_type(mtype, limit).await {
+                    all_memories.append(&mut mems);
+                }
+            }
+            all_memories.sort_by_key(|a| std::cmp::Reverse(a.created_at));
+            for mem in &mut all_memories {
+                mem.mark_retrieved();
+                let _ = self.repository.update(mem).await;
+            }
+            all_memories
         } else {
-            Err(ApplicationError::InvalidQuery(
-                "Debe especificarse al menos un ID, texto de consulta (query), proyecto o tipo de memoria para recall".into(),
-            ))
+            return Err(ApplicationError::InvalidQuery(
+                "Debe especificarse al menos un ID, texto de consulta (query), proyecto, tipo de memoria o filtro para recall".into(),
+            ));
+        };
+
+        if let Some(min_imp) = query.min_importance {
+            memories.retain(|m| m.importance.value() >= min_imp);
+        }
+        if let Some(from) = query.from_date {
+            memories.retain(|m| m.created_at >= from);
+        }
+        if let Some(to) = query.to_date {
+            memories.retain(|m| m.created_at <= to);
+        }
+        memories.truncate(limit);
+
+        Ok(memories)
+    }
+}
+
+/// Caso de Uso: Eliminación lógica (soft-delete) de un recuerdo (SRS §31, §34).
+#[derive(Clone)]
+pub struct ForgetUseCase {
+    repository: Arc<dyn MemoryRepository>,
+}
+
+impl ForgetUseCase {
+    pub fn new(repository: Arc<dyn MemoryRepository>) -> Self {
+        Self { repository }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn execute(&self, id: MemoryId) -> Result<(), ApplicationError> {
+        let maybe_mem = self.repository.find_by_id(&id).await?;
+        match maybe_mem {
+            Some(mem) if mem.is_active() => {
+                self.repository.soft_delete(&id).await?;
+                info!(memory_id = %id, "Recuerdo eliminado lógicamente (soft-delete)");
+                Ok(())
+            }
+            _ => Err(ApplicationError::NotFound(id)),
         }
     }
 }
@@ -593,5 +677,54 @@ mod tests {
         let updated = mem_repo.find_by_id(&memory.id).await.unwrap().unwrap();
         assert_eq!(updated.status, MemoryStatus::Active);
         assert!(updated.embedding.is_some());
+    }
+
+    #[tokio::test]
+    async fn forget_use_case_lifecycle() {
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = RememberUseCase::new(mem_repo.clone());
+        let recall_uc = RecallUseCase::new(mem_repo.clone());
+        let forget_uc = ForgetUseCase::new(mem_repo.clone());
+
+        let cmd = RememberCommand::new("Memoria para olvidar").with_project("test");
+        let mem = remember_uc.execute(cmd).await.unwrap();
+
+        // Verificar que está activa
+        let recalled = recall_uc.execute(RecallQuery::by_id(mem.id)).await.unwrap();
+        assert_eq!(recalled.len(), 1);
+
+        // Olvidar
+        forget_uc.execute(mem.id).await.unwrap();
+
+        // Ya no debe ser recuperable vía recall
+        let err = recall_uc.execute(RecallQuery::by_id(mem.id)).await;
+        assert_eq!(err, Err(ApplicationError::NotFound(mem.id)));
+
+        // Intentar olvidar de nuevo debe retornar NotFound
+        let err2 = forget_uc.execute(mem.id).await;
+        assert_eq!(err2, Err(ApplicationError::NotFound(mem.id)));
+    }
+
+    #[tokio::test]
+    async fn recall_with_advanced_filters() {
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = RememberUseCase::new(mem_repo.clone());
+        let recall_uc = RecallUseCase::new(mem_repo.clone());
+
+        let cmd1 = RememberCommand::new("Memoria crítica")
+            .with_project("local-brain")
+            .with_importance(0.95);
+        let cmd2 = RememberCommand::new("Memoria trivial")
+            .with_project("local-brain")
+            .with_importance(0.1);
+
+        remember_uc.execute(cmd1).await.unwrap();
+        remember_uc.execute(cmd2).await.unwrap();
+
+        // Filtro con min_importance
+        let query = RecallQuery::by_project("local-brain").with_min_importance(0.8);
+        let results = recall_uc.execute(query).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content.text(), "Memoria crítica");
     }
 }
