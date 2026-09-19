@@ -22,6 +22,9 @@ pub enum ApplicationError {
     #[error("Error de grafo: {0}")]
     Graph(#[from] brain_graph::GraphError),
 
+    #[error("Error de aprendizaje: {0}")]
+    Learning(#[from] brain_learning::LearningError),
+
     #[error("Recuerdo con ID {0} no encontrado")]
     NotFound(MemoryId),
 

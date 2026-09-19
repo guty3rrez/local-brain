@@ -18,7 +18,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | **Fase 3** | MCP Server (MVP Parte 3) | 🟢 Completado | `[██████████] 100%` | E2E + BDD + Security |
 | **Fase 4** | Memory Types Specialization | 🟢 Completado | `[██████████] 100%` | Unit + Integration + BDD + MCP + CLI |
 | **Fase 5** | Knowledge Graph & Relations | 🟢 Completado | `[██████████] 100%` | Pure Domain + PostgreSQL CTEs + Stress 1k + MCP Tools + CLI + BDD |
-| **Fase 6** | Learning & Candidate Knowledge | ⚪ Planificado | `[░░░░░░░░░░] 0%` | BDD + Mutation |
+| **Fase 6** | Learning & Candidate Knowledge | 🟢 Completado | `[██████████] 100%` | Pure Domain + Confidence Scoring + PostgreSQL + MCP brain_learn/brain_explain + CLI + BDD |
 | **Fase 7** | Consolidation & Reflection | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
 | **Fase 8** | Advanced Hybrid Retrieval & Scoring | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Benchmarks + Unit |
 | **Fase 9** | Hardening, Benchmarking & Production | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Full Arsenal |
@@ -238,17 +238,17 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 6 — Learning & Candidate Knowledge (SRS §15, §59, §60, §68)
 *Objetivo: Distinguir observaciones de creencias y transformar experiencias en conocimiento candidato.*
 
-- [ ] **[F6-01] Pipeline Observación vs Creencia** `P1`
+- [x] **[F6-01] Pipeline Observación vs Creencia** `P1`
   - **Descripción**: Crate `brain-learning`. Ninguna afirmación aislada de un agente se convierte en verdad absoluta: Experience → Observation → Candidate Knowledge → Validation → Consolidated Knowledge.
   - **Arsenal**:
     - *Unit*: Lógica de umbrales para ascender de observación a creencia.
     - *BDD*: Escenario de mitigación de alucinación del agente.
-- [ ] **[F6-02] Algoritmo de Confianza (Confidence Score 0.0 - 1.0)** `P1`
+- [x] **[F6-02] Algoritmo de Confianza (Confidence Score 0.0 - 1.0)** `P1`
   - **Descripción**: Cálculo probabilístico y heurístico basado en número de evidencias, consistencia histórica y validación humana.
   - **Arsenal**:
     - *Unit*: Test suite matemático con casos extremos.
     - *Mutation*: `cargo-mutants` en fórmulas de confianza.
-- [ ] **[F6-03] Tool MCP `brain_learn` y `brain_explain`** `P1`
+- [x] **[F6-03] Tool MCP `brain_learn` y `brain_explain`** `P1`
   - **Descripción**: `brain_explain` responde "¿Por qué sabemos esto?" desglosando evidencia, historial y confianza.
   - **Arsenal**: *BDD*: Escenario "Agent asks brain to explain why .NET is preferred".
 

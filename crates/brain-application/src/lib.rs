@@ -6,9 +6,14 @@
 //! y coordina los puertos secundarios de persistencia y embeddings.
 
 pub mod graph_use_cases;
+pub mod learning_use_cases;
 pub mod use_cases;
 
 pub use graph_use_cases::{RelateCommand, RelateUseCase, TraverseGraphQuery, TraverseGraphUseCase};
+pub use learning_use_cases::{
+    AddEvidenceCommand, AddEvidenceUseCase, ExplainQuery, ExplainUseCase, ExplanationReport,
+    LearnCommand, LearnResult, LearnUseCase,
+};
 pub use use_cases::{
     ApplicationError, EmbedPendingUseCase, ExpireSessionUseCase, ForgetUseCase,
     PurgeExpiredUseCase, RecallQuery, RecallUseCase, RememberCommand, RememberUseCase,

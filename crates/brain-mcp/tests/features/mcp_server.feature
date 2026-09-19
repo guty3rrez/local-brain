@@ -33,3 +33,10 @@ Característica: Servidor Model Context Protocol (MCP) para interacción con age
     Entonces la respuesta confirma que la relación fue establecida
     Cuando el agente explora el grafo para "Rust" mediante la herramienta "brain_graph"
     Entonces la respuesta contiene el nodo "PostgreSQL" con protección de contexto
+
+  Escenario: Agente aprende y consulta explicación mediante herramientas MCP brain_learn y brain_explain
+    Dado un servidor MCP activo con política de seguridad completa
+    Cuando el agente ejecuta la herramienta "brain_learn" registrando la creencia ".NET es ideal para arquitecturas limpias" con evidencia "EF Core y MediatR funcionan excelente"
+    Entonces la respuesta confirma que el aprendizaje fue registrado
+    Cuando el agente solicita una explicación con "brain_explain" para ".NET es ideal"
+    Entonces la respuesta contiene la conclusión ".NET es ideal para arquitecturas limpias" con protección de contexto

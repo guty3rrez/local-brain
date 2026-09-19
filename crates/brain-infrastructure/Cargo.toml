@@ -10,6 +10,7 @@ brain-core = { path = "../brain-core" }
 brain-domain = { path = "../brain-domain" }
 brain-application = { path = "../brain-application" }
 brain-graph = { path = "../brain-graph" }
+brain-learning = { path = "../brain-learning" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }

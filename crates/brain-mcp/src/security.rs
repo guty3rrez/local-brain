@@ -164,6 +164,27 @@ pub fn format_retrieved_memories(memories: &[Memory]) -> String {
     output
 }
 
+/// Envuelve una explicación estructurada en delimitadores de contexto no confiable (SRS §32, §57).
+pub fn wrap_untrusted_explanation(explanation: &str, conclusion: &str, confidence: f32) -> String {
+    let sanitized_text = explanation
+        .replace(
+            "</untrusted_explanation_context>",
+            "&lt;/untrusted_explanation_context&gt;",
+        )
+        .replace(
+            "<untrusted_explanation_context>",
+            "&lt;untrusted_explanation_context&gt;",
+        );
+
+    format!(
+        "{notice}\n\n<untrusted_explanation_context conclusion=\"{conclusion}\" confidence=\"{confidence:.2}\">\n{content}\n</untrusted_explanation_context>",
+        notice = PROMPT_INJECTION_SECURITY_NOTICE,
+        conclusion = conclusion,
+        confidence = confidence,
+        content = sanitized_text
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,7 +11,9 @@ pub mod embeddings;
 pub mod persistence;
 
 pub use embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
-pub use persistence::{PostgresGraphRepository, PostgresMemoryRepository};
+pub use persistence::{
+    PostgresGraphRepository, PostgresLearningRepository, PostgresMemoryRepository,
+};
 
 pub const INFRASTRUCTURE_LAYER: &str = "brain-infrastructure";
 

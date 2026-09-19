@@ -8,16 +8,18 @@ use serde_json::json;
 use tracing::{error, info, warn};
 
 use brain_application::{
-    ApplicationError, ExpireSessionUseCase, ForgetUseCase, RecallQuery, RecallUseCase,
-    RelateCommand, RelateUseCase, RememberCommand, RememberUseCase, TraverseGraphQuery,
-    TraverseGraphUseCase,
+    ApplicationError, ExpireSessionUseCase, ExplainQuery, ExplainUseCase, ForgetUseCase,
+    LearnCommand, LearnUseCase, RecallQuery, RecallUseCase, RelateCommand, RelateUseCase,
+    RememberCommand, RememberUseCase, TraverseGraphQuery, TraverseGraphUseCase,
 };
 use brain_domain::model::{MemoryId, MemoryType, ProcedureStep};
 use brain_graph::model::{RelationType, TraversalDirection};
+use brain_learning::model::EvidenceSourceType;
 
 use crate::protocol::{ToolCallResult, ToolDefinition};
 use crate::security::{
-    format_retrieved_memories, McpPermission, McpSecurityError, McpSecurityPolicy,
+    format_retrieved_memories, wrap_untrusted_explanation, McpPermission, McpSecurityError,
+    McpSecurityPolicy,
 };
 
 /// Retorna la lista de definiciones de herramientas estándar expuestas por Local Brain (SRS §21, §10).
@@ -319,6 +321,67 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["node"]
+            }),
+        },
+        ToolDefinition {
+            name: "brain_learn".to_string(),
+            description: "Registra una observación empírica o propone una creencia candidata sujeta a verificación en el ciclo de aprendizaje de Local Brain (SRS §15, §21.4, §59, §60). Permite añadir evidencia de soporte o refutación.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "statement": {
+                        "type": "string",
+                        "description": "Afirmación, creencia o contenido de la observación."
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "description": "Evidencia empírica inicial que respalda o refuta la afirmación."
+                    },
+                    "source_type": {
+                        "type": "string",
+                        "enum": ["human", "tool_execution", "direct_observation", "agent_hypothesis"],
+                        "description": "Origen o tipo de la fuente de evidencia (por defecto: 'direct_observation')."
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Área técnica, proyecto o dominio temático asociado."
+                    },
+                    "agent": {
+                        "type": "string",
+                        "description": "Identificador del agente que reporta el aprendizaje."
+                    },
+                    "is_supporting": {
+                        "type": "boolean",
+                        "description": "Indica si la evidencia apoya (true) o refuta/contradice (false) la afirmación (por defecto: true)."
+                    },
+                    "human_validated": {
+                        "type": "boolean",
+                        "description": "Indica si la creencia cuenta con aprobación y validación humana explícita."
+                    },
+                    "is_observation": {
+                        "type": "boolean",
+                        "description": "Si es true, se registra como una observación factual puntual sin generalizar a creencia (SRS §59)."
+                    }
+                },
+                "required": ["statement"]
+            }),
+        },
+        ToolDefinition {
+            name: "brain_explain".to_string(),
+            description: "Responde '¿Por qué el sistema cree esto?' desglosando la conclusión, evidencias empíricas acumuladas, consistencia, historial y nivel de confianza (SRS §21.5, §57).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Pregunta conceptual, afirmación o identificador UUID del conocimiento a explicar (ej. '¿Por qué recomendamos .NET?')."
+                    },
+                    "domain": {
+                        "type": "string",
+                        "description": "Dominio o proyecto opcional para filtrar la búsqueda."
+                    }
+                },
+                "required": ["query"]
             }),
         },
     ]
@@ -973,6 +1036,133 @@ pub async fn execute_graph(
     }
 }
 
+/// Ejecuta la herramienta `brain_learn` (SRS §15, §21.4, §59, §60, Fase 6).
+pub async fn execute_learn(
+    args: serde_json::Value,
+    learn_uc: Option<Arc<LearnUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Write) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let statement = match args.get("statement").and_then(|v| v.as_str()) {
+        Some(s) if !s.trim().is_empty() => s.to_string(),
+        _ => {
+            return ToolCallResult::error(
+                "El argumento 'statement' es obligatorio y no puede estar vacío.",
+            )
+        }
+    };
+
+    let Some(uc) = learn_uc else {
+        return ToolCallResult::error(
+            "El caso de uso LearnUseCase no está configurado en este servidor MCP.",
+        );
+    };
+
+    let is_observation = args
+        .get("is_observation")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let mut cmd = if is_observation {
+        LearnCommand::new_observation(statement)
+    } else {
+        LearnCommand::new_candidate(statement)
+    };
+
+    if let Some(ev) = args.get("evidence").and_then(|v| v.as_str()) {
+        let src_type = args
+            .get("source_type")
+            .and_then(|v| v.as_str())
+            .and_then(|s| EvidenceSourceType::from_str(s).ok())
+            .unwrap_or(EvidenceSourceType::DirectObservation);
+        cmd = cmd.with_evidence(ev, src_type);
+    }
+
+    if let Some(dom) = args.get("domain").and_then(|v| v.as_str()) {
+        cmd = cmd.with_domain(dom);
+    }
+    if let Some(ag) = args.get("agent").and_then(|v| v.as_str()) {
+        cmd = cmd.with_agent(ag);
+    }
+    if let Some(supp) = args.get("is_supporting").and_then(|v| v.as_bool()) {
+        cmd = cmd.with_supporting(supp);
+    }
+    if let Some(hv) = args.get("human_validated").and_then(|v| v.as_bool()) {
+        cmd = cmd.with_human_validated(hv);
+    }
+
+    match uc.execute(cmd).await {
+        Ok(res) => {
+            info!(
+                candidate_id = %res.candidate_id,
+                stage = %res.stage,
+                confidence = res.confidence,
+                "Aprendizaje registrado exitosamente vía MCP"
+            );
+            ToolCallResult::success(format!(
+                "Aprendizaje registrado exitosamente.\nID Candidato: {}\nEtapa: {}\nConfianza: {:.2}\nEvidencias: {}\nValidado por humano: {}",
+                res.candidate_id,
+                res.stage.as_str().to_uppercase(),
+                res.confidence,
+                res.evidence_count,
+                if res.human_validated { "Sí" } else { "No" }
+            ))
+        }
+        Err(e) => {
+            warn!(error = %e, "Fallo al ejecutar LearnUseCase vía MCP");
+            ToolCallResult::error(format!("Error al registrar aprendizaje: {e}"))
+        }
+    }
+}
+
+/// Ejecuta la herramienta `brain_explain` (SRS §21.5, §57, Fase 6).
+pub async fn execute_explain(
+    args: serde_json::Value,
+    explain_uc: Option<Arc<ExplainUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Read) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let query = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) if !q.trim().is_empty() => q.to_string(),
+        _ => {
+            return ToolCallResult::error(
+                "El argumento 'query' es obligatorio y no puede estar vacío.",
+            )
+        }
+    };
+
+    let Some(uc) = explain_uc else {
+        return ToolCallResult::error(
+            "El caso de uso ExplainUseCase no está configurado en este servidor MCP.",
+        );
+    };
+
+    let mut q = ExplainQuery::new(query);
+    if let Some(dom) = args.get("domain").and_then(|v| v.as_str()) {
+        q = q.with_domain(dom);
+    }
+
+    match uc.execute(q).await {
+        Ok(report) => {
+            let sanitized = wrap_untrusted_explanation(
+                &report.formatted_explanation,
+                &report.conclusion,
+                report.confidence,
+            );
+            ToolCallResult::success(sanitized)
+        }
+        Err(e) => {
+            warn!(error = %e, "Fallo al ejecutar ExplainUseCase vía MCP");
+            ToolCallResult::error(format!("Error al generar explicación: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1159,6 +1349,54 @@ mod tests {
         let ro_res = execute_relate(
             json!({"source": "A", "target": "B", "relation": "RELATED_TO"}),
             Some(relate_uc),
+            &ro_policy,
+        )
+        .await;
+        assert!(ro_res.is_error);
+        assert!(ro_res.content[0].text.contains("Permiso denegado"));
+    }
+
+    #[tokio::test]
+    async fn test_learn_and_explain_tools_flow() {
+        use brain_learning::InMemoryLearningRepository;
+
+        let learn_repo = Arc::new(InMemoryLearningRepository::new());
+        let learn_uc = Arc::new(LearnUseCase::new(learn_repo.clone()));
+        let explain_uc = Arc::new(ExplainUseCase::new(learn_repo));
+        let policy = McpSecurityPolicy::new_full();
+
+        // 1. Proponer candidato con evidencia vía MCP
+        let learn_args = json!({
+            "statement": ".NET es altamente recomendado para backends complejos",
+            "evidence": "Experience #182: Manejo de reglas empresariales y roles",
+            "source_type": "direct_observation",
+            "domain": "backend",
+            "human_validated": true
+        });
+        let res_learn = execute_learn(learn_args, Some(learn_uc.clone()), &policy).await;
+        assert!(!res_learn.is_error);
+        assert!(res_learn.content[0]
+            .text
+            .contains("Aprendizaje registrado exitosamente"));
+        assert!(res_learn.content[0].text.contains("VALIDATED"));
+
+        // 2. Consultar explicación vía MCP
+        let explain_args = json!({
+            "query": ".NET es altamente recomendado"
+        });
+        let res_explain = execute_explain(explain_args, Some(explain_uc), &policy).await;
+        assert!(!res_explain.is_error);
+        let exp_txt = &res_explain.content[0].text;
+        assert!(exp_txt.contains("<untrusted_explanation_context"));
+        assert!(exp_txt.contains("Conclusión:"));
+        assert!(exp_txt.contains("Confianza:"));
+        assert!(exp_txt.contains("Validación Humana:"));
+
+        // 3. Política de solo lectura bloquea learn
+        let ro_policy = McpSecurityPolicy::new_read_only();
+        let ro_res = execute_learn(
+            json!({"statement": "Prueba de solo lectura"}),
+            Some(learn_uc),
             &ro_policy,
         )
         .await;

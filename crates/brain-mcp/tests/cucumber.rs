@@ -4,10 +4,12 @@ use cucumber::{given, then, when, World};
 use std::sync::Arc;
 
 use brain_application::{
-    ForgetUseCase, RecallUseCase, RelateUseCase, RememberUseCase, TraverseGraphUseCase,
+    ExplainUseCase, ForgetUseCase, LearnUseCase, RecallUseCase, RelateUseCase, RememberUseCase,
+    TraverseGraphUseCase,
 };
 use brain_domain::ports::InMemoryMemoryRepository;
 use brain_graph::InMemoryGraphRepository;
+use brain_learning::InMemoryLearningRepository;
 use brain_mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
 use brain_mcp::security::McpSecurityPolicy;
 use brain_mcp::server::McpServer;
@@ -41,13 +43,18 @@ async fn given_mcp_server(world: &mut McpWorld) {
         Arc::new(RelateUseCase::new(graph_repo.clone()).with_memory_repository(repo.clone()));
     let traverse_uc = Arc::new(TraverseGraphUseCase::new(graph_repo));
 
+    let learning_repo = Arc::new(InMemoryLearningRepository::new());
+    let learn_uc = Arc::new(LearnUseCase::new(learning_repo.clone()));
+    let explain_uc = Arc::new(ExplainUseCase::new(learning_repo));
+
     let server = McpServer::new(
         remember_uc,
         recall_uc,
         forget_uc,
         McpSecurityPolicy::new_full(),
     )
-    .with_graph(relate_uc, traverse_uc);
+    .with_graph(relate_uc, traverse_uc)
+    .with_learning(learn_uc, explain_uc);
     world.server = Some(server);
 }
 
@@ -295,6 +302,67 @@ async fn then_graph_response_protected(world: &mut McpWorld, node_name: String) 
     assert!(text.contains(&node_name));
     assert!(text.contains("<untrusted_graph_context>"));
     assert!(text.contains("</untrusted_graph_context>"));
+}
+
+#[when(
+    expr = "el agente ejecuta la herramienta {string} registrando la creencia {string} con evidencia {string}"
+)]
+async fn when_agent_calls_learn(
+    world: &mut McpWorld,
+    tool_name: String,
+    statement: String,
+    evidence: String,
+) {
+    let server = world.server.as_ref().expect("Servidor MCP no inicializado");
+    let req = JsonRpcRequest::new("tools/call", Some(serde_json::json!(12))).with_params(
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": {
+                "statement": statement,
+                "evidence": evidence,
+                "domain_area": "clean-architecture",
+                "source_type": "observation"
+            }
+        }),
+    );
+    world.last_response = server.handle_request(req).await;
+}
+
+#[then(expr = "la respuesta confirma que el aprendizaje fue registrado")]
+async fn then_learn_confirmed(world: &mut McpWorld) {
+    let resp = world.last_response.as_ref().expect("Sin respuesta previa");
+    let result = resp.result.as_ref().expect("Resultado esperado");
+    let is_error = result
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    assert!(!is_error, "Se esperaba resultado exitoso");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Aprendizaje registrado") || text.contains("Evidencia agregada"));
+}
+
+#[when(expr = "el agente solicita una explicación con {string} para {string}")]
+async fn when_agent_calls_explain(world: &mut McpWorld, tool_name: String, query: String) {
+    let server = world.server.as_ref().expect("Servidor MCP no inicializado");
+    let req = JsonRpcRequest::new("tools/call", Some(serde_json::json!(13))).with_params(
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": {
+                "query": query
+            }
+        }),
+    );
+    world.last_response = server.handle_request(req).await;
+}
+
+#[then(expr = "la respuesta contiene la conclusión {string} con protección de contexto")]
+async fn then_explain_response_protected(world: &mut McpWorld, conclusion: String) {
+    let resp = world.last_response.as_ref().expect("Sin respuesta previa");
+    let result = resp.result.as_ref().expect("Resultado esperado");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains(&conclusion));
+    assert!(text.contains("<untrusted_explanation_context"));
+    assert!(text.contains("</untrusted_explanation_context>"));
 }
 
 #[tokio::main]

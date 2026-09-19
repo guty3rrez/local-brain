@@ -7,6 +7,10 @@ use std::time::Duration;
 use cucumber::{given, then, when, World};
 use sqlx::postgres::PgPoolOptions;
 
+use brain_application::{
+    AddEvidenceCommand, AddEvidenceUseCase, ExplainQuery, ExplainUseCase, ExplanationReport,
+    LearnCommand, LearnResult, LearnUseCase,
+};
 use brain_domain::model::{
     AssociativeMemoryData, EpisodicMemoryData, Memory, MemoryContent, MemoryId, MemoryOrigin,
     MemoryStatus, MemoryType, MemoryTypeData, ProceduralMemoryData, ProcedureStep, Provenance,
@@ -18,12 +22,18 @@ use brain_graph::model::{
     GraphEdge, GraphSubgraph, GraphTraversalOptions, NodeType, RelationType, TraversalDirection,
 };
 use brain_graph::ports::GraphRepository;
-use brain_infrastructure::persistence::{PostgresGraphRepository, PostgresMemoryRepository};
+use brain_infrastructure::persistence::{
+    PostgresGraphRepository, PostgresLearningRepository, PostgresMemoryRepository,
+};
+use brain_learning::model::EvidenceSourceType;
+use brain_learning::ports::LearningRepository;
+use std::sync::Arc;
 
-#[derive(Debug, Default, World)]
+#[derive(Default, World)]
 pub struct MemoryWorld {
     repo: Option<PostgresMemoryRepository>,
     graph_repo: Option<PostgresGraphRepository>,
+    learning_repo: Option<PostgresLearningRepository>,
     saved_memory: Option<Memory>,
     retrieved_memory: Option<Memory>,
     indexed_vector: Option<Vec<f32>>,
@@ -32,6 +42,17 @@ pub struct MemoryWorld {
     graph_error: Option<String>,
     decision_memories: HashMap<String, Memory>,
     graph_subgraph: Option<GraphSubgraph>,
+    last_learn_result: Option<LearnResult>,
+    explanation_report: Option<ExplanationReport>,
+    learn_uc: Option<Arc<LearnUseCase>>,
+    add_evidence_uc: Option<Arc<AddEvidenceUseCase>>,
+    explain_uc: Option<Arc<ExplainUseCase>>,
+}
+
+impl std::fmt::Debug for MemoryWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryWorld").finish()
+    }
 }
 
 #[given(expr = "un repositorio PostgreSQL conectado y con migraciones aplicadas")]
@@ -653,7 +674,299 @@ async fn then_traverse_returns_nodes(
     assert!(has_n2, "El subgrafo debe contener el nodo '{expected_n2}'");
 }
 
+// =========================================================================
+// Pasos BDD para el Motor de Aprendizaje y Conocimiento Candidato (Fase 6)
+// =========================================================================
+
+#[given(expr = "un repositorio PostgreSQL conectado con tablas de aprendizaje")]
+async fn given_connected_learning_repo(world: &mut MemoryWorld) {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://localbrain:localbrain_secret@localhost:5433/local_brain".to_string()
+    });
+
+    let pool = PgPoolOptions::new()
+        .max_connections(3)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect(&database_url)
+        .await
+        .expect("Debe conectar con PostgreSQL");
+
+    let repo = PostgresLearningRepository::new(pool.clone());
+    repo.run_migrations()
+        .await
+        .expect("Debe ejecutar migraciones de aprendizaje");
+
+    sqlx::query("DELETE FROM learning_evidence")
+        .execute(&pool)
+        .await
+        .expect("Debe limpiar tabla learning_evidence");
+    sqlx::query("DELETE FROM learning_candidates")
+        .execute(&pool)
+        .await
+        .expect("Debe limpiar tabla learning_candidates");
+
+    let repo_arc = Arc::new(repo.clone());
+    world.learning_repo = Some(repo);
+    world.learn_uc = Some(Arc::new(LearnUseCase::new(repo_arc.clone())));
+    world.add_evidence_uc = Some(Arc::new(AddEvidenceUseCase::new(repo_arc.clone())));
+    world.explain_uc = Some(Arc::new(ExplainUseCase::new(repo_arc)));
+}
+
+#[when(expr = "registro una observación factual {string} para el dominio {string}")]
+async fn when_register_observation(world: &mut MemoryWorld, statement: String, domain: String) {
+    let uc = world
+        .learn_uc
+        .as_ref()
+        .expect("LearnUseCase no inicializado");
+    let cmd = LearnCommand::new_observation(statement)
+        .with_domain(domain)
+        .with_agent("bdd-agent");
+    let res = uc.execute(cmd).await.expect("Debe registrar observación");
+    world.last_learn_result = Some(res);
+}
+
+#[then(expr = "la observación se almacena en etapa {string} con confianza menor a {float}")]
+async fn then_observation_stored(
+    world: &mut MemoryWorld,
+    expected_stage: String,
+    max_confidence: f32,
+) {
+    let res = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay resultado de aprendizaje");
+    assert_eq!(res.stage.as_str(), expected_stage.to_lowercase().as_str());
+    assert!(
+        res.confidence < max_confidence,
+        "La confianza {} debe ser menor a {}",
+        res.confidence,
+        max_confidence
+    );
+}
+
+#[when(expr = "propongo una creencia candidata {string} con evidencia {string}")]
+async fn when_propose_candidate(world: &mut MemoryWorld, statement: String, evidence: String) {
+    let uc = world
+        .learn_uc
+        .as_ref()
+        .expect("LearnUseCase no inicializado");
+    let cmd = LearnCommand::new_candidate(statement)
+        .with_evidence(evidence, EvidenceSourceType::DirectObservation)
+        .with_agent("bdd-agent");
+    let res = uc.execute(cmd).await.expect("Debe registrar candidato");
+    world.last_learn_result = Some(res);
+}
+
+#[then(expr = "la creencia se registra en etapa {string}")]
+async fn then_belief_registered(world: &mut MemoryWorld, expected_stage: String) {
+    let res = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay resultado de aprendizaje");
+    assert_eq!(res.stage.as_str(), expected_stage.to_lowercase().as_str());
+}
+
+#[when(expr = "agrego la evidencia de herramienta {string} de soporte")]
+async fn when_add_tool_evidence(world: &mut MemoryWorld, content: String) {
+    let uc = world
+        .add_evidence_uc
+        .as_ref()
+        .expect("AddEvidenceUseCase no inicializado");
+    let last = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay candidato activo");
+    let cmd = AddEvidenceCommand::new(
+        last.candidate_id,
+        content,
+        EvidenceSourceType::ToolExecution,
+        true,
+    )
+    .with_agent("bdd-tool");
+    let res = uc.execute(cmd).await.expect("Debe agregar evidencia");
+    world.last_learn_result = Some(res);
+}
+
+#[then(expr = "la creencia madura a etapa {string} con confianza superior a {float}")]
+async fn then_belief_matures(world: &mut MemoryWorld, expected_stage: String, min_conf: f32) {
+    let res = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay resultado de aprendizaje");
+    assert_eq!(res.stage.as_str(), expected_stage.to_lowercase().as_str());
+    assert!(
+        res.confidence > min_conf,
+        "La confianza {} debe ser mayor a {}",
+        res.confidence,
+        min_conf
+    );
+}
+
+#[when(expr = "un agente afirma {string} sin evidencias ni validación humana")]
+async fn when_agent_hallucinates(world: &mut MemoryWorld, statement: String) {
+    let uc = world
+        .learn_uc
+        .as_ref()
+        .expect("LearnUseCase no inicializado");
+    let cmd = LearnCommand::new_candidate(statement).with_agent("hallucinating-agent");
+    let res = uc.execute(cmd).await.expect("Debe registrar candidato");
+    world.last_learn_result = Some(res);
+}
+
+#[then(expr = "la afirmación permanece en etapa {string}")]
+async fn then_statement_remains(world: &mut MemoryWorld, expected_stage: String) {
+    let res = world.last_learn_result.as_ref().expect("No hay resultado");
+    assert_eq!(res.stage.as_str(), expected_stage.to_lowercase().as_str());
+}
+
+#[then(expr = "la confianza asignada no supera el umbral tentativo de {float}")]
+async fn then_confidence_below(world: &mut MemoryWorld, threshold: f32) {
+    let res = world.last_learn_result.as_ref().expect("No hay resultado");
+    assert!(
+        res.confidence <= threshold,
+        "La confianza {} debe ser <= {}",
+        res.confidence,
+        threshold
+    );
+}
+
+#[then(expr = "no puede ascender a {string} sin respaldo empírico")]
+async fn then_cannot_promote(world: &mut MemoryWorld, disallowed_stage: String) {
+    let res = world.last_learn_result.as_ref().expect("No hay resultado");
+    assert_ne!(res.stage.as_str(), disallowed_stage.to_lowercase().as_str());
+}
+
+#[when(expr = "registro el conocimiento candidato {string} para el dominio {string}")]
+async fn when_register_candidate_with_domain(
+    world: &mut MemoryWorld,
+    statement: String,
+    domain: String,
+) {
+    let uc = world
+        .learn_uc
+        .as_ref()
+        .expect("LearnUseCase no inicializado");
+    let cmd = LearnCommand::new_candidate(statement)
+        .with_domain(domain)
+        .with_agent("architect-agent");
+    let res = uc.execute(cmd).await.expect("Debe registrar candidato");
+    world.last_learn_result = Some(res);
+}
+
+#[when(expr = "agrego la evidencia {string} de soporte")]
+async fn when_add_evidence_generic(world: &mut MemoryWorld, content: String) {
+    let uc = world
+        .add_evidence_uc
+        .as_ref()
+        .expect("AddEvidenceUseCase no inicializado");
+    let last = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay candidato activo");
+    let cmd = AddEvidenceCommand::new(
+        last.candidate_id,
+        content,
+        EvidenceSourceType::DirectObservation,
+        true,
+    )
+    .with_agent("bdd-agent");
+    let res = uc.execute(cmd).await.expect("Debe agregar evidencia");
+    world.last_learn_result = Some(res);
+}
+
+#[when(expr = "el conocimiento es validado formalmente por un humano")]
+async fn when_human_validates(world: &mut MemoryWorld) {
+    let last = world
+        .last_learn_result
+        .as_ref()
+        .expect("No hay candidato activo");
+    let repo = world.learning_repo.as_ref().expect("Repo no disponible");
+    let mut cand = repo
+        .find_candidate_by_id(&last.candidate_id)
+        .await
+        .unwrap()
+        .unwrap();
+    cand.human_validated = true;
+    brain_learning::invariants::LearningInvariants::evaluate_progression(&mut cand).unwrap();
+    repo.update_candidate(&cand).await.unwrap();
+    world.last_learn_result = Some(LearnResult {
+        candidate_id: cand.id,
+        statement: cand.statement,
+        stage: cand.stage,
+        confidence: cand.confidence.value(),
+        evidence_count: cand.evidences.len(),
+        human_validated: cand.human_validated,
+        domain: cand.domain,
+    });
+}
+
+#[when(expr = "solicito la explicación para {string}")]
+async fn when_request_explanation(world: &mut MemoryWorld, query: String) {
+    let uc = world
+        .explain_uc
+        .as_ref()
+        .expect("ExplainUseCase no inicializado");
+    let report = uc
+        .execute(ExplainQuery::new(query))
+        .await
+        .expect("Debe generar informe de explicación");
+    world.explanation_report = Some(report);
+}
+
+#[then(expr = "la explicación contiene la conclusión {string}")]
+async fn then_explanation_has_conclusion(world: &mut MemoryWorld, expected: String) {
+    let report = world
+        .explanation_report
+        .as_ref()
+        .expect("No hay informe de explicación");
+    assert_eq!(report.conclusion, expected);
+}
+
+#[then(expr = "la explicación reporta confianza superior a {float}")]
+async fn then_explanation_confidence_above(world: &mut MemoryWorld, threshold: f32) {
+    let report = world
+        .explanation_report
+        .as_ref()
+        .expect("No hay informe de explicación");
+    assert!(
+        report.confidence > threshold,
+        "Confianza {} debe ser mayor a {}",
+        report.confidence,
+        threshold
+    );
+}
+
+#[then(expr = "la explicación detalla las evidencias {string} y {string}")]
+async fn then_explanation_has_evidences(world: &mut MemoryWorld, ev1: String, ev2: String) {
+    let report = world
+        .explanation_report
+        .as_ref()
+        .expect("No hay informe de explicación");
+    let has_ev1 = report.evidences.iter().any(|e| e.content.contains(&ev1));
+    let has_ev2 = report.evidences.iter().any(|e| e.content.contains(&ev2));
+    assert!(has_ev1, "La explicación debe detallar la evidencia '{ev1}'");
+    assert!(has_ev2, "La explicación debe detallar la evidencia '{ev2}'");
+}
+
+#[then(expr = "la explicación indica validación humana aprobada")]
+async fn then_explanation_human_validated(world: &mut MemoryWorld) {
+    let report = world
+        .explanation_report
+        .as_ref()
+        .expect("No hay informe de explicación");
+    assert!(
+        report.human_validated,
+        "Debe indicar validación humana aprobada"
+    );
+    assert!(report
+        .formatted_explanation
+        .contains("Validación Humana:\nSí"));
+}
+
 #[tokio::main]
 async fn main() {
-    MemoryWorld::run("tests/features").await;
+    MemoryWorld::cucumber()
+        .max_concurrent_scenarios(1)
+        .run_and_exit("tests/features")
+        .await;
 }

@@ -17,7 +17,9 @@ fn cli_help_and_version() {
         .stdout(predicate::str::contains("init"))
         .stdout(predicate::str::contains("status"))
         .stdout(predicate::str::contains("relate"))
-        .stdout(predicate::str::contains("graph"));
+        .stdout(predicate::str::contains("graph"))
+        .stdout(predicate::str::contains("learn"))
+        .stdout(predicate::str::contains("explain"));
 
     let mut ver_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
     ver_cmd
@@ -453,4 +455,166 @@ fn cli_relate_dag_cycle_rejection() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Ciclo"));
+}
+
+#[test]
+fn cli_learn_in_memory() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("--in-memory")
+        .arg("learn")
+        .arg("Rust previene memory leaks y data races")
+        .arg("--evidence")
+        .arg("El compilador y borrow checker garantizan thread safety")
+        .arg("--source-type")
+        .arg("direct-observation")
+        .arg("--domain")
+        .arg("rust-safety")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Aprendizaje registrado exitosamente en Local Brain",
+        ))
+        .stdout(predicate::str::contains("rust-safety"))
+        .stdout(predicate::str::contains("CANDIDATE"));
+}
+
+#[test]
+fn cli_learn_and_explain_integration() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let statement = format!("PostgreSQL soporta búsqueda semántica eficiente con pgvector [{tag}]");
+    let evidence_1 =
+        format!("Se realizaron benchmarks HNSW con indexación de 768 dimensiones [{tag}]");
+    let evidence_2 = format!("La extensión pgvector está activa y verificada en CI [{tag}]");
+
+    // 1. Primer aprendizaje
+    let mut learn_cmd1 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    learn_cmd1
+        .arg("learn")
+        .arg(&statement)
+        .arg("--evidence")
+        .arg(&evidence_1)
+        .arg("--source-type")
+        .arg("tool-execution")
+        .arg("--domain")
+        .arg("database")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Aprendizaje registrado exitosamente en Local Brain",
+        ))
+        .stdout(predicate::str::contains(&statement))
+        .stdout(predicate::str::contains("Evidencias:          1"));
+
+    // 2. Agregar evidencia adicional que refuerza la creencia
+    let mut learn_cmd2 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    learn_cmd2
+        .arg("learn")
+        .arg(&statement)
+        .arg("--evidence")
+        .arg(&evidence_2)
+        .arg("--source-type")
+        .arg("direct-observation")
+        .arg("--domain")
+        .arg("database")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Aprendizaje registrado exitosamente en Local Brain",
+        ))
+        .stdout(predicate::str::contains("Evidencias:          2"));
+
+    // 3. Explicar epistémicamente el conocimiento
+    let mut explain_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    explain_cmd
+        .arg("explain")
+        .arg(&statement)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Explicabilidad Cognitiva"))
+        .stdout(predicate::str::contains(&statement))
+        .stdout(predicate::str::contains("Confianza:"))
+        .stdout(predicate::str::contains("Evidencia:"));
+}
+
+#[test]
+fn cli_explain_json_format() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let statement = format!("Arquitectura Hexagonal desacopla el dominio de IO [{tag}]");
+    let evidence = format!("Las entidades puras en brain-domain no importan SQLx ni HTTP [{tag}]");
+
+    let mut learn_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    learn_cmd
+        .arg("learn")
+        .arg(&statement)
+        .arg("--evidence")
+        .arg(&evidence)
+        .arg("--source-type")
+        .arg("tool-execution")
+        .arg("--domain")
+        .arg("architecture")
+        .assert()
+        .success();
+
+    let mut explain_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    explain_cmd
+        .arg("explain")
+        .arg(&statement)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"conclusion\":"))
+        .stdout(predicate::str::contains(&statement))
+        .stdout(predicate::str::contains("\"confidence\":"))
+        .stdout(predicate::str::contains("\"evidences\":"));
+}
+
+#[test]
+fn cli_learn_contradiction_flow() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let statement = format!("Todo microservicio debe usar gRPC [{tag}]");
+    let evidence_sup = format!("gRPC ofrece alto rendimiento binario con protobuf [{tag}]");
+    let evidence_contra = format!("Para clientes web públicos REST es más accesible [{tag}]");
+
+    // Registro inicial a favor
+    let mut learn_cmd1 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    learn_cmd1
+        .arg("learn")
+        .arg(&statement)
+        .arg("--evidence")
+        .arg(&evidence_sup)
+        .arg("--source-type")
+        .arg("direct-observation")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Aprendizaje registrado exitosamente en Local Brain",
+        ))
+        .stdout(predicate::str::contains("Evidencias:          1"));
+
+    // Registro de evidencia contradictoria
+    let mut learn_cmd2 = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    learn_cmd2
+        .arg("learn")
+        .arg(&statement)
+        .arg("--evidence")
+        .arg(&evidence_contra)
+        .arg("--source-type")
+        .arg("tool-execution")
+        .arg("--refutes")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Aprendizaje registrado exitosamente en Local Brain",
+        ))
+        .stdout(predicate::str::contains("Evidencias:          2"));
+
+    // Explicación debe reflejar la contradicción
+    let mut explain_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    explain_cmd
+        .arg("explain")
+        .arg(&statement)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&statement))
+        .stdout(predicate::str::contains("[-] REFUTA"));
 }

@@ -10,9 +10,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sqlx::Row;
 
 use brain_application::{
-    EmbedPendingUseCase, ExpireSessionUseCase, ForgetUseCase, PurgeExpiredUseCase, RecallQuery,
-    RecallUseCase, RelateCommand, RelateUseCase, RememberCommand, RememberUseCase,
-    TraverseGraphQuery, TraverseGraphUseCase,
+    EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery, ExplainUseCase, ForgetUseCase,
+    LearnCommand, LearnUseCase, PurgeExpiredUseCase, RecallQuery, RecallUseCase, RelateCommand,
+    RelateUseCase, RememberCommand, RememberUseCase, TraverseGraphQuery, TraverseGraphUseCase,
 };
 use brain_core::CORE_VERSION;
 use brain_domain::model::{DomainError, MemoryId, MemoryStatus, MemoryType};
@@ -22,7 +22,10 @@ use brain_domain::ports::{
 };
 use brain_graph::{GraphRepository, InMemoryGraphRepository, RelationType, TraversalDirection};
 use brain_infrastructure::embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
-use brain_infrastructure::{PostgresGraphRepository, PostgresMemoryRepository};
+use brain_infrastructure::{
+    PostgresGraphRepository, PostgresLearningRepository, PostgresMemoryRepository,
+};
+use brain_learning::{EvidenceSourceType, InMemoryLearningRepository, LearningRepository};
 use brain_mcp::{McpSecurityPolicy, McpServer};
 
 #[derive(Parser, Debug)]
@@ -80,6 +83,12 @@ enum Commands {
 
     /// Explora y navega el grafo de conocimiento a partir de un nodo raíz (SRS §11, §25, §38)
     Graph(GraphArgs),
+
+    /// Registra una observación empírica o propone conocimiento candidato con evidencias (SRS §15, §59, §60, Fase 6)
+    Learn(LearnArgs),
+
+    /// Explica el fundamento empírico, evidencias y nivel de confianza de un conocimiento o creencia (SRS §57, Fase 6)
+    Explain(ExplainArgs),
 }
 
 #[derive(Args, Debug)]
@@ -179,6 +188,73 @@ impl From<CliTraversalDirection> for TraversalDirection {
             CliTraversalDirection::Both => TraversalDirection::Both,
         }
     }
+}
+
+#[derive(Args, Debug)]
+struct LearnArgs {
+    /// Afirmación, observación o creencia candidata
+    statement: String,
+
+    /// Evidencia empírica inicial que respalda o refuta la afirmación
+    #[arg(short, long)]
+    evidence: Option<String>,
+
+    /// Origen o tipo de fuente de la evidencia
+    #[arg(short = 's', long = "source-type", value_enum, default_value_t = CliEvidenceSourceType::DirectObservation)]
+    source_type: CliEvidenceSourceType,
+
+    /// Proyecto o dominio de conocimiento asociado
+    #[arg(short, long)]
+    domain: Option<String>,
+
+    /// Identificador del agente que registra el aprendizaje
+    #[arg(short, long)]
+    agent: Option<String>,
+
+    /// Indica si la evidencia refuta en lugar de apoyar la afirmación
+    #[arg(long = "refutes", default_value_t = false)]
+    refutes: bool,
+
+    /// Marca la afirmación como validada y aprobada por un humano
+    #[arg(long = "human-validated", default_value_t = false)]
+    human_validated: bool,
+
+    /// Registrar como observación factual puntual en lugar de creencia generalizada (SRS §59)
+    #[arg(short = 'o', long = "observation", default_value_t = false)]
+    is_observation: bool,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum CliEvidenceSourceType {
+    Human,
+    ToolExecution,
+    DirectObservation,
+    AgentHypothesis,
+}
+
+impl From<CliEvidenceSourceType> for EvidenceSourceType {
+    fn from(val: CliEvidenceSourceType) -> Self {
+        match val {
+            CliEvidenceSourceType::Human => EvidenceSourceType::Human,
+            CliEvidenceSourceType::ToolExecution => EvidenceSourceType::ToolExecution,
+            CliEvidenceSourceType::DirectObservation => EvidenceSourceType::DirectObservation,
+            CliEvidenceSourceType::AgentHypothesis => EvidenceSourceType::AgentHypothesis,
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+struct ExplainArgs {
+    /// Pregunta conceptual, afirmación o UUID del conocimiento a explicar (ej. '¿Por qué recomendamos .NET?')
+    query: String,
+
+    /// Dominio o proyecto para filtrar la búsqueda
+    #[arg(short, long)]
+    domain: Option<String>,
+
+    /// Muestra la salida en formato JSON estructurado
+    #[arg(long, default_value_t = false)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -358,6 +434,7 @@ struct AppContext {
     vector_repo: Arc<dyn VectorRepository>,
     embedding_provider: Arc<dyn EmbeddingProvider>,
     graph_repo: Arc<dyn GraphRepository>,
+    learning_repo: Arc<dyn LearningRepository>,
 }
 
 async fn build_context(
@@ -371,12 +448,14 @@ async fn build_context(
             vector_repo: Arc::new(InMemoryVectorRepository::new()),
             embedding_provider: Arc::new(InMemoryEmbeddingProvider::new()),
             graph_repo: Arc::new(InMemoryGraphRepository::new()),
+            learning_repo: Arc::new(InMemoryLearningRepository::new()),
         })
     } else {
         let db_url = resolve_database_url(db_url_override);
         let pool = build_pg_pool(&db_url).await?;
         let pg_repo = Arc::new(PostgresMemoryRepository::new(pool.clone()));
-        let graph_repo = Arc::new(PostgresGraphRepository::new(pool));
+        let graph_repo = Arc::new(PostgresGraphRepository::new(pool.clone()));
+        let learning_repo = Arc::new(PostgresLearningRepository::new(pool));
 
         let emb_url = resolve_embedding_url(emb_url_override);
         let emb_provider = Arc::new(
@@ -391,6 +470,7 @@ async fn build_context(
             vector_repo: pg_repo,
             embedding_provider: emb_provider,
             graph_repo,
+            learning_repo,
         })
     }
 }
@@ -794,6 +874,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     );
                                 }
                             }
+
+                            // Estadísticas de Learning Engine (SRS §15, §59, Fase 6)
+                            let learning_stats = sqlx::query(
+                                r#"
+                                SELECT 
+                                    (SELECT COUNT(*) FROM learning_candidates)::bigint AS candidates_count,
+                                    (SELECT COUNT(*) FROM learning_evidence)::bigint AS evidences_count,
+                                    (SELECT COUNT(*) FROM learning_candidates WHERE stage = 'validated')::bigint AS validated_count
+                                "#,
+                            )
+                            .fetch_one(&pool)
+                            .await;
+
+                            if let Ok(l_row) = learning_stats {
+                                let cands: i64 = l_row.try_get("candidates_count").unwrap_or(0);
+                                let evs: i64 = l_row.try_get("evidences_count").unwrap_or(0);
+                                let valids: i64 = l_row.try_get("validated_count").unwrap_or(0);
+                                println!(
+                                    "   Learning Engine:     Candidatos: {cands} | Evidencias: {evs} | Validados: {valids}"
+                                );
+                            }
                         }
                         Err(sqlx::Error::Database(db_err))
                             if db_err.code().as_deref() == Some("42P01") =>
@@ -859,6 +960,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .with_memory_repository(ctx.memory_repo.clone()),
             );
             let traverse_uc = Arc::new(TraverseGraphUseCase::new(ctx.graph_repo.clone()));
+            let learn_uc = Arc::new(
+                LearnUseCase::new(ctx.learning_repo.clone())
+                    .with_memory_repository(ctx.memory_repo.clone()),
+            );
+            let explain_uc = Arc::new(
+                ExplainUseCase::new(ctx.learning_repo.clone())
+                    .with_memory_repository(ctx.memory_repo.clone()),
+            );
 
             let security = if args.read_only {
                 McpSecurityPolicy::new_read_only()
@@ -870,7 +979,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let server = McpServer::new(remember_uc, recall_uc, forget_uc, security)
                 .with_expire_session_uc(expire_session_uc)
-                .with_graph(relate_uc, traverse_uc);
+                .with_graph(relate_uc, traverse_uc)
+                .with_learning(learn_uc, explain_uc);
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ Error en servidor MCP: {e}");
                 std::process::exit(1);
@@ -1041,6 +1151,108 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => {
                     eprintln!("❌ Error al purgar recuerdos expirados: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Learn(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let use_case =
+                LearnUseCase::new(ctx.learning_repo).with_memory_repository(ctx.memory_repo);
+
+            let mut cmd = if args.is_observation {
+                LearnCommand::new_observation(args.statement)
+            } else {
+                LearnCommand::new_candidate(args.statement)
+            };
+
+            if let Some(ev) = args.evidence {
+                cmd = cmd.with_evidence(ev, args.source_type.into());
+            }
+            if let Some(dom) = args.domain {
+                cmd = cmd.with_domain(dom);
+            }
+            if let Some(ag) = args.agent {
+                cmd = cmd.with_agent(ag);
+            }
+            cmd = cmd.with_supporting(!args.refutes);
+            cmd = cmd.with_human_validated(args.human_validated);
+
+            match use_case.execute(cmd).await {
+                Ok(res) => {
+                    println!("🧠 Aprendizaje registrado exitosamente en Local Brain");
+                    println!("   Candidato ID:        {}", res.candidate_id);
+                    println!("   Afirmación:          {}", res.statement);
+                    println!(
+                        "   Etapa:               {}",
+                        res.stage.as_str().to_uppercase()
+                    );
+                    println!("   Confianza:           {:.2}", res.confidence);
+                    println!("   Evidencias:          {}", res.evidence_count);
+                    if let Some(ref dom) = res.domain {
+                        println!("   Dominio:             {dom}");
+                    }
+                    println!(
+                        "   Validación Humana:   {}",
+                        if res.human_validated {
+                            "Sí (Aprobado)"
+                        } else {
+                            "No"
+                        }
+                    );
+                }
+                Err(e) => {
+                    eprintln!("❌ Error al registrar aprendizaje: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Explain(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let use_case =
+                ExplainUseCase::new(ctx.learning_repo).with_memory_repository(ctx.memory_repo);
+
+            let mut query = ExplainQuery::new(args.query);
+            if let Some(dom) = args.domain {
+                query = query.with_domain(dom);
+            }
+
+            match use_case.execute(query).await {
+                Ok(report) => {
+                    if args.json {
+                        match serde_json::to_string_pretty(&report) {
+                            Ok(json_str) => println!("{json_str}"),
+                            Err(e) => {
+                                eprintln!("❌ Error al serializar explicación a JSON: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!("🧠 Local Brain — Explicabilidad Cognitiva (SRS §57)");
+                        println!("───────────────────────────────────────────────────");
+                        println!("{}", report.formatted_explanation);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error al generar explicación: {e}");
                     std::process::exit(1);
                 }
             }

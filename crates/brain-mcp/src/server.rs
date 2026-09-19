@@ -5,8 +5,8 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tracing::{debug, info};
 
 use brain_application::{
-    ExpireSessionUseCase, ForgetUseCase, RecallUseCase, RelateUseCase, RememberUseCase,
-    TraverseGraphUseCase,
+    ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, LearnUseCase, RecallUseCase,
+    RelateUseCase, RememberUseCase, TraverseGraphUseCase,
 };
 use brain_core::CORE_VERSION;
 
@@ -16,8 +16,8 @@ use crate::protocol::{
 };
 use crate::security::McpSecurityPolicy;
 use crate::tools::{
-    execute_forget, execute_graph, execute_recall, execute_relate, execute_remember,
-    execute_search, execute_session_end, list_tools,
+    execute_explain, execute_forget, execute_graph, execute_learn, execute_recall, execute_relate,
+    execute_remember, execute_search, execute_session_end, list_tools,
 };
 
 /// Servidor MCP de Local Brain.
@@ -29,6 +29,8 @@ pub struct McpServer {
     expire_session_uc: Option<Arc<ExpireSessionUseCase>>,
     relate_uc: Option<Arc<RelateUseCase>>,
     traverse_uc: Option<Arc<TraverseGraphUseCase>>,
+    learn_uc: Option<Arc<LearnUseCase>>,
+    explain_uc: Option<Arc<ExplainUseCase>>,
     security: McpSecurityPolicy,
 }
 
@@ -47,6 +49,8 @@ impl McpServer {
             expire_session_uc: None,
             relate_uc: None,
             traverse_uc: None,
+            learn_uc: None,
+            explain_uc: None,
             security,
         }
     }
@@ -65,6 +69,17 @@ impl McpServer {
     ) -> Self {
         self.relate_uc = Some(relate_uc);
         self.traverse_uc = Some(traverse_uc);
+        self
+    }
+
+    /// Adjunta los casos de uso para operaciones de aprendizaje y explicabilidad (SRS §15, §57, §59, §60, F6-03).
+    pub fn with_learning(
+        mut self,
+        learn_uc: Arc<LearnUseCase>,
+        explain_uc: Arc<ExplainUseCase>,
+    ) -> Self {
+        self.learn_uc = Some(learn_uc);
+        self.explain_uc = Some(explain_uc);
         self
     }
 
@@ -156,6 +171,12 @@ impl McpServer {
                     }
                     "brain_graph" => {
                         execute_graph(arguments, self.traverse_uc.clone(), &self.security).await
+                    }
+                    "brain_learn" => {
+                        execute_learn(arguments, self.learn_uc.clone(), &self.security).await
+                    }
+                    "brain_explain" => {
+                        execute_explain(arguments, self.explain_uc.clone(), &self.security).await
                     }
                     _ => {
                         return Some(JsonRpcResponse::error(

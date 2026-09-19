@@ -45,7 +45,7 @@ Monitorea el avance de las fases definidas en la especificación formal ([`SRS �
 | **Fase 3** | **Model Context Protocol (MCP) (MVP)** | 🟢 *Completado* | `[██████████] 100%` | Servidor MCP (stdio), 7 tools para agentes, mitigación prompt injection |
 | **Fase 4** | **Especialización de Tipos de Memoria** | 🟢 *Completado* | `[██████████] 100%` | Working (sesiones/TTL), Episodic, Semantic, Procedural, Associative |
 | **Fase 5** | **Knowledge Graph & Relaciones** | 🟢 *Completado* | `[██████████] 100%` | 10 relaciones canónicas, CTEs recursivos, DAGs sin ciclos, MCP y CLI |
-| **Fase 6** | **Learning & Candidate Knowledge** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Observación vs Creencia, confidence scoring |
+| **Fase 6** | **Learning & Candidate Knowledge** | 🟢 *Completado* | `[██████████] 100%` | Observación vs Creencia, confidence scoring, `brain_learn` / `brain_explain` MCP & CLI |
 | **Fase 7** | **Consolidación & Reflexión** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | `brain reflect`, clustering, contradicciones (`CONFLICT`) |
 | **Fase 8** | **Advanced Hybrid Retrieval** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Pipeline híbrido, scoring multidimensional, olvido |
 | **Fase 9** | **Hardening & Producción** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Modo offline, benchmarks p95 < 500ms, backup |
