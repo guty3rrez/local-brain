@@ -7,6 +7,7 @@
 
 pub mod consolidation_use_cases;
 pub mod graph_use_cases;
+pub mod hybrid_retrieval_use_cases;
 pub mod learning_use_cases;
 pub mod use_cases;
 
@@ -15,6 +16,9 @@ pub use consolidation_use_cases::{
     ReflectCommand, ReflectUseCase, ResolveConflictCommand, ResolveConflictUseCase,
 };
 pub use graph_use_cases::{RelateCommand, RelateUseCase, TraverseGraphQuery, TraverseGraphUseCase};
+pub use hybrid_retrieval_use_cases::{
+    HybridRetrieveQuery, HybridRetrieveResult, HybridRetrieveUseCase,
+};
 pub use learning_use_cases::{
     AddEvidenceCommand, AddEvidenceUseCase, ExplainQuery, ExplainUseCase, ExplanationReport,
     LearnCommand, LearnResult, LearnUseCase,

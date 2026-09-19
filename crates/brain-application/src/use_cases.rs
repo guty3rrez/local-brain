@@ -25,6 +25,9 @@ pub enum ApplicationError {
     #[error("Error de aprendizaje: {0}")]
     Learning(#[from] brain_learning::LearningError),
 
+    #[error("Error de recuperación híbrida: {0}")]
+    Retrieval(#[from] brain_retrieval::RetrievalError),
+
     #[error("Recuerdo con ID {0} no encontrado")]
     NotFound(MemoryId),
 

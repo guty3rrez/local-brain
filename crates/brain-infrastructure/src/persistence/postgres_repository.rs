@@ -8,6 +8,7 @@ use brain_domain::model::{
     MemoryTypeData, Provenance, Utility, Version,
 };
 use brain_domain::ports::{MemoryRepository, VectorRepository};
+use brain_retrieval::FullTextSearchRepository;
 use pgvector::Vector;
 
 /// Adaptador secundario de persistencia relacional en PostgreSQL mediante SQLx (SRS §25.1).
@@ -491,6 +492,53 @@ impl VectorRepository for PostgresMemoryRepository {
                 .try_get("similarity")
                 .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
             results.push((MemoryId::from_uuid(id), similarity as f32));
+        }
+
+        Ok(results)
+    }
+}
+
+#[async_trait]
+impl FullTextSearchRepository for PostgresMemoryRepository {
+    async fn search_fulltext(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(MemoryId, f32)>, DomainError> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT id, ts_rank_cd(tsv, plainto_tsquery('english', $1)) AS rank
+            FROM memories
+            WHERE status = 'active'
+              AND (expires_at IS NULL OR expires_at > NOW())
+              AND tsv @@ plainto_tsquery('english', $1)
+            ORDER BY rank DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(trimmed)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            DomainError::RepositoryError(format!("Error en búsqueda léxica full-text: {e}"))
+        })?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: uuid::Uuid = row
+                .try_get("id")
+                .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+            let rank: f32 = row
+                .try_get("rank")
+                .map_err(|e| DomainError::RepositoryError(e.to_string()))?;
+            let normalized_rank = (rank * 10.0).clamp(0.05, 1.0);
+            results.push((MemoryId::from_uuid(id), normalized_rank));
         }
 
         Ok(results)

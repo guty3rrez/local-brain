@@ -9,20 +9,25 @@ use sqlx::postgres::PgPoolOptions;
 
 use brain_application::{
     AddEvidenceCommand, AddEvidenceUseCase, ConsolidateUseCase, ExplainQuery, ExplainUseCase,
-    ExplanationReport, LearnCommand, LearnResult, LearnUseCase, ReflectCommand, ReflectUseCase,
+    ExplanationReport, HybridRetrieveQuery, HybridRetrieveResult, HybridRetrieveUseCase,
+    LearnCommand, LearnResult, LearnUseCase, ReflectCommand, ReflectUseCase,
     ResolveConflictCommand, ResolveConflictUseCase,
 };
 use brain_consolidation::model::{Contradiction, ReflectionReport};
 use brain_consolidation::ports::ConflictRepository;
 use brain_domain::model::{
-    AssociativeMemoryData, EpisodicMemoryData, Memory, MemoryContent, MemoryId, MemoryOrigin,
-    MemoryStatus, MemoryType, MemoryTypeData, ProceduralMemoryData, ProcedureStep, Provenance,
-    SemanticMemoryData, WorkingMemoryData,
+    AssociativeMemoryData, Confidence, EpisodicMemoryData, Importance, Memory, MemoryContent,
+    MemoryId, MemoryOrigin, MemoryStatus, MemoryType, MemoryTypeData, ProceduralMemoryData,
+    ProcedureStep, Provenance, SemanticMemoryData, WorkingMemoryData,
 };
-use brain_domain::ports::{MemoryRepository, VectorRepository, DEFAULT_EMBEDDING_DIMENSION};
+use brain_domain::ports::{
+    EmbeddingProvider, InMemoryEmbeddingProvider, MemoryRepository, VectorRepository,
+    DEFAULT_EMBEDDING_DIMENSION,
+};
 use brain_graph::errors::GraphError;
 use brain_graph::model::{
-    GraphEdge, GraphSubgraph, GraphTraversalOptions, NodeType, RelationType, TraversalDirection,
+    GraphEdge, GraphNode, GraphSubgraph, GraphTraversalOptions, NodeType, RelationType,
+    TraversalDirection,
 };
 use brain_graph::ports::GraphRepository;
 use brain_infrastructure::persistence::{
@@ -32,6 +37,9 @@ use brain_infrastructure::persistence::{
 use brain_infrastructure::{LlamaCppReflectionClient, LlamaCppReflectionConfig};
 use brain_learning::model::EvidenceSourceType;
 use brain_learning::ports::LearningRepository;
+use brain_retrieval::{
+    calculate_decay_factor, DecayConfig, DecayStrategy, FullTextSearchRepository, RetrievalConfig,
+};
 use std::sync::Arc;
 
 #[derive(Default, World)]
@@ -59,6 +67,10 @@ pub struct MemoryWorld {
     reflection_report: Option<ReflectionReport>,
     active_conflict: Option<Contradiction>,
     last_registered_memories: Vec<Memory>,
+    hybrid_retrieve_uc: Option<Arc<HybridRetrieveUseCase>>,
+    hybrid_retrieve_result: Option<HybridRetrieveResult>,
+    decay_memories: HashMap<String, (chrono::DateTime<chrono::Utc>, f32)>,
+    calculated_decay_factors: HashMap<String, f32>,
 }
 
 impl std::fmt::Debug for MemoryWorld {
@@ -220,8 +232,6 @@ async fn then_similarity_above(world: &mut MemoryWorld, threshold: f32) {
 }
 
 // Pasos para Tipos Especializados de Memoria (specialized_memory_types.feature)
-
-use brain_domain::model::Confidence;
 
 #[when(
     expr = "guardo un recuerdo episódico con contexto {string} y acción {string} y resultado {string} para el proyecto {string}"
@@ -1305,6 +1315,308 @@ async fn then_both_memories_restored_to(world: &mut MemoryWorld, expected_status
             expected_status
         );
     }
+}
+
+// ============================================================================
+// Pasos para Recuperación Híbrida Avanzada y Scoring Multidimensional (hybrid_retrieval.feature)
+// ============================================================================
+
+async fn setup_hybrid_env(world: &mut MemoryWorld, with_graph: bool) {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://localbrain:localbrain_secret@localhost:5433/local_brain".to_string()
+    });
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect(&database_url)
+        .await
+        .expect("Debe conectar con la base de datos PostgreSQL local");
+
+    let repo = PostgresMemoryRepository::new(pool.clone());
+    repo.run_migrations()
+        .await
+        .expect("Debe ejecutar las migraciones");
+
+    let graph_repo = PostgresGraphRepository::new(pool.clone());
+
+    let mem_arc: Arc<dyn MemoryRepository> = Arc::new(repo.clone());
+    let vec_arc: Arc<dyn VectorRepository> = Arc::new(repo.clone());
+    let fts_arc: Arc<dyn FullTextSearchRepository> = Arc::new(repo.clone());
+    let graph_arc: Option<Arc<dyn GraphRepository>> = if with_graph {
+        Some(Arc::new(graph_repo.clone()))
+    } else {
+        None
+    };
+
+    let emb_provider = Arc::new(InMemoryEmbeddingProvider::new());
+    let config = RetrievalConfig::default();
+
+    let uc = Arc::new(HybridRetrieveUseCase::new(
+        mem_arc,
+        vec_arc,
+        emb_provider,
+        fts_arc,
+        graph_arc,
+        config,
+    ));
+
+    world.repo = Some(repo);
+    world.graph_repo = Some(graph_repo);
+    world.hybrid_retrieve_uc = Some(uc);
+}
+
+#[given(expr = "un entorno de recuperación híbrida conectado")]
+async fn given_hybrid_env(world: &mut MemoryWorld) {
+    setup_hybrid_env(world, false).await;
+}
+
+#[given(expr = "un entorno de recuperación híbrida conectado con soporte de grafo")]
+async fn given_hybrid_env_with_graph(world: &mut MemoryWorld) {
+    setup_hybrid_env(world, true).await;
+}
+
+#[given(expr = "un recuerdo registrado con texto {string} e importancia {float}")]
+async fn given_memory_text_importance(world: &mut MemoryWorld, text: String, importance: f32) {
+    let repo = world.repo.as_ref().expect("Repo");
+    let content = MemoryContent::new(&text).expect("Contenido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-retrieval");
+    let mut memory = Memory::new_episodic(content, prov, Some("bdd-hybrid".to_string()));
+    memory.importance = Importance::new(importance).expect("Importancia válida");
+
+    let emb_provider = InMemoryEmbeddingProvider::new();
+    let embedding = emb_provider.embed(&text).await.unwrap();
+    memory.embedding = Some(embedding);
+
+    repo.save(&memory).await.expect("Guardar memoria");
+    world.saved_memory = Some(memory.clone());
+    world.last_registered_memories.push(memory);
+}
+
+#[given(expr = "un recuerdo relacionado en el grafo con texto {string}")]
+async fn given_related_memory_in_graph(world: &mut MemoryWorld, text: String) {
+    let repo = world.repo.as_ref().expect("Repo");
+    let graph = world.graph_repo.as_ref().expect("Graph repo");
+    let seed = world.saved_memory.as_ref().expect("Seed memory");
+
+    let content = MemoryContent::new(&text).expect("Contenido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-retrieval");
+    let mut target_memory = Memory::new_episodic(content, prov, Some("bdd-hybrid".to_string()));
+    target_memory.importance = Importance::new(0.75).expect("Importancia válida");
+
+    let emb_provider = InMemoryEmbeddingProvider::new();
+    let embedding = emb_provider.embed(&text).await.unwrap();
+    target_memory.embedding = Some(embedding);
+
+    repo.save(&target_memory).await.expect("Guardar memoria");
+
+    let node_a = GraphNode::new_memory(seed.id, seed.content.text()).unwrap();
+    let node_b = GraphNode::new_memory(target_memory.id, target_memory.content.text()).unwrap();
+
+    let _ = graph.save_node(&node_a).await;
+    let _ = graph.save_node(&node_b).await;
+
+    let edge = GraphEdge::new(node_a.id, node_b.id, RelationType::RelatedTo, 0.9).unwrap();
+    graph
+        .save_edge(&edge)
+        .await
+        .expect("Guardar arista en grafo");
+}
+
+#[given(
+    expr = "un recuerdo registrado con texto {string} con importancia {float} y confianza {float}"
+)]
+async fn given_memory_text_importance_confidence(
+    world: &mut MemoryWorld,
+    text: String,
+    importance: f32,
+    confidence: f32,
+) {
+    let repo = world.repo.as_ref().expect("Repo");
+    let content = MemoryContent::new(&text).expect("Contenido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-retrieval");
+    let mut memory = Memory::new_episodic(content, prov, Some("bdd-hybrid".to_string()));
+    memory.importance = Importance::new(importance).expect("Importancia válida");
+    memory.confidence = Confidence::new(confidence).expect("Confianza válida");
+
+    let emb_provider = InMemoryEmbeddingProvider::new();
+    let embedding = emb_provider.embed(&text).await.unwrap();
+    memory.embedding = Some(embedding);
+
+    repo.save(&memory).await.expect("Guardar memoria");
+    world.saved_memory = Some(memory.clone());
+    world.last_registered_memories.push(memory);
+}
+
+#[when(expr = "ejecuto una consulta de recuperación híbrida con texto {string}")]
+async fn when_hybrid_retrieve(world: &mut MemoryWorld, query_text: String) {
+    let uc = world
+        .hybrid_retrieve_uc
+        .as_ref()
+        .expect("HybridRetrieveUseCase");
+    let query = HybridRetrieveQuery::new(query_text).with_explain(true);
+    let result = uc
+        .execute(query)
+        .await
+        .expect("Ejecutar recuperación híbrida");
+    world.hybrid_retrieve_result = Some(result);
+}
+
+#[then(expr = "el resultado contiene {string}")]
+async fn then_hybrid_result_contains(world: &mut MemoryWorld, expected_snippet: String) {
+    let result = world
+        .hybrid_retrieve_result
+        .as_ref()
+        .expect("Resultado de recuperación");
+    let found = result
+        .items
+        .iter()
+        .any(|item| item.memory.content.text().contains(&expected_snippet));
+    assert!(
+        found,
+        "El resultado híbrido debía contener '{}', pero contiene: {:?}",
+        expected_snippet,
+        result
+            .items
+            .iter()
+            .map(|i| i.memory.content.text())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[then(expr = "el pipeline reporta métricas de fusión híbrida exitosas")]
+async fn then_pipeline_metrics_success(world: &mut MemoryWorld) {
+    let result = world
+        .hybrid_retrieve_result
+        .as_ref()
+        .expect("Resultado de recuperación");
+    assert!(
+        result.metrics.merged_unique_count >= 1,
+        "Debe haber al menos 1 candidato fusionado"
+    );
+}
+
+#[then(expr = "el pipeline reporta candidatos expandidos por grafo")]
+async fn then_pipeline_reports_graph_candidates(world: &mut MemoryWorld) {
+    let result = world
+        .hybrid_retrieve_result
+        .as_ref()
+        .expect("Resultado de recuperación");
+    assert!(
+        result.metrics.graph_candidates_count >= 1,
+        "Debe reportar candidatos expandidos por grafo"
+    );
+}
+
+#[then(expr = "el recuerdo {string} tiene un score final mayor que el de menor importancia")]
+async fn then_higher_importance_has_higher_score(
+    world: &mut MemoryWorld,
+    expected_top_text: String,
+) {
+    let result = world
+        .hybrid_retrieve_result
+        .as_ref()
+        .expect("Resultado de recuperación");
+    assert!(
+        result.items.len() >= 2,
+        "Se esperaban al menos 2 items para comparar"
+    );
+
+    let top_item = result
+        .items
+        .iter()
+        .find(|i| i.memory.content.text().contains(&expected_top_text))
+        .expect("Memoria de alta importancia debe estar presente");
+    let other_item = result
+        .items
+        .iter()
+        .find(|i| !i.memory.content.text().contains(&expected_top_text))
+        .expect("Otra memoria debe estar presente");
+
+    assert!(
+        top_item.explanation.final_score > other_item.explanation.final_score,
+        "El score de '{}' ({}) debe ser mayor que '{}' ({})",
+        top_item.memory.content.text(),
+        top_item.explanation.final_score,
+        other_item.memory.content.text(),
+        other_item.explanation.final_score
+    );
+}
+
+#[given(expr = "un recuerdo con antigüedad de {int} días e importancia {float}")]
+async fn given_decay_memory(world: &mut MemoryWorld, days: i64, importance: f32) {
+    let created_at = chrono::Utc::now() - chrono::Duration::days(days);
+    world
+        .decay_memories
+        .insert(format!("mem_{}", importance), (created_at, importance));
+}
+
+#[when(expr = "calculo el factor de decaimiento temporal con estrategia half-life")]
+async fn when_calc_decay_factor(world: &mut MemoryWorld) {
+    let config = DecayConfig {
+        strategy: DecayStrategy::HalfLife,
+        half_life_days: 30.0,
+        ..Default::default()
+    };
+    for (key, (created_at, importance)) in &world.decay_memories {
+        let factor = calculate_decay_factor(
+            *created_at,
+            None,
+            chrono::Utc::now(),
+            *importance,
+            0.8,
+            0.8,
+            &config,
+        );
+        world.calculated_decay_factors.insert(key.clone(), factor);
+    }
+}
+
+#[then(expr = "el recuerdo con importancia {float} mantiene un factor de decaimiento de {float}")]
+async fn then_decay_factor_protected(
+    world: &mut MemoryWorld,
+    importance: f32,
+    expected_factor: f32,
+) {
+    let key = format!("mem_{}", importance);
+    let factor = world
+        .calculated_decay_factors
+        .get(&key)
+        .expect("Factor calculado");
+    assert!(
+        (*factor - expected_factor).abs() < 1e-4,
+        "Factor de decaimiento {} debe ser {}",
+        factor,
+        expected_factor
+    );
+}
+
+#[then(
+    expr = "el recuerdo con importancia {float} tiene un factor de decaimiento inferior a {float}"
+)]
+async fn then_decay_factor_decayed(world: &mut MemoryWorld, importance: f32, max_factor: f32) {
+    let key = format!("mem_{}", importance);
+    let factor = world
+        .calculated_decay_factors
+        .get(&key)
+        .expect("Factor calculado");
+    assert!(
+        *factor < max_factor,
+        "Factor de decaimiento {} debe ser menor a {}",
+        factor,
+        max_factor
+    );
+}
+
+#[then(expr = "el contexto ensamblado está delimitado por {string}")]
+async fn then_context_delimited(world: &mut MemoryWorld, delimiter: String) {
+    let result = world.hybrid_retrieve_result.as_ref().expect("Resultado");
+    assert!(
+        result.assembled_context.contains(&delimiter),
+        "El contexto ensamblado debe contener el delimitador '{}'. Contexto: {}",
+        delimiter,
+        result.assembled_context
+    );
 }
 
 #[tokio::main]

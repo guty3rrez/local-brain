@@ -12,6 +12,7 @@ brain-application = { path = "../brain-application" }
 brain-graph = { path = "../brain-graph" }
 brain-learning = { path = "../brain-learning" }
 brain-consolidation = { path = "../brain-consolidation" }
+brain-retrieval = { path = "../brain-retrieval" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

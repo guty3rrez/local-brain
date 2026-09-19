@@ -9,9 +9,9 @@ use tracing::{error, info, warn};
 
 use brain_application::{
     ApplicationError, ConsolidateCommand, ConsolidateUseCase, ExpireSessionUseCase, ExplainQuery,
-    ExplainUseCase, ForgetUseCase, LearnCommand, LearnUseCase, RecallQuery, RecallUseCase,
-    ReflectCommand, ReflectUseCase, RelateCommand, RelateUseCase, RememberCommand, RememberUseCase,
-    TraverseGraphQuery, TraverseGraphUseCase,
+    ExplainUseCase, ForgetUseCase, HybridRetrieveQuery, HybridRetrieveUseCase, LearnCommand,
+    LearnUseCase, RecallQuery, RecallUseCase, ReflectCommand, ReflectUseCase, RelateCommand,
+    RelateUseCase, RememberCommand, RememberUseCase, TraverseGraphQuery, TraverseGraphUseCase,
 };
 use brain_domain::model::{MemoryId, MemoryType, ProcedureStep};
 use brain_graph::model::{RelationType, TraversalDirection};
@@ -411,6 +411,45 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                         "description": "Si es true, simula la consolidación sin persistir cambios."
                     }
                 }
+            }),
+        },
+        ToolDefinition {
+            name: "brain_retrieve".to_string(),
+            description: "Recuperación híbrida avanzada de memoria cognitiva combinando búsqueda semántica vectorial, búsqueda léxica full-text (FTS) y expansión en grafo de conocimiento con scoring multidimensional y decaimiento temporal (SRS §13, §14, §56, §58).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Consulta o intención de búsqueda semántica y léxica."
+                    },
+                    "project": {
+                        "type": "string",
+                        "description": "Filtro opcional por proyecto."
+                    },
+                    "memory_type": {
+                        "type": "string",
+                        "enum": ["episodic", "semantic", "procedural", "associative", "working"],
+                        "description": "Filtro opcional por tipo cognitivo de memoria."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Cantidad máxima de recuerdos relevantes a retornar (por defecto 10)."
+                    },
+                    "min_score": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Puntaje mínimo de ranking para admitir un recuerdo."
+                    },
+                    "explain": {
+                        "type": "boolean",
+                        "description": "Si es true, desglosa el cálculo matemático de scoring y señales de ranking (SRS §57)."
+                    }
+                },
+                "required": ["query"]
             }),
         },
     ]
@@ -1288,6 +1327,70 @@ pub async fn execute_consolidate(
     }
 }
 
+/// Ejecuta la herramienta `brain_retrieve` (F8-01, SRS §13, §14, §56, §58).
+pub async fn execute_retrieve(
+    args: serde_json::Value,
+    retrieve_uc: Option<Arc<HybridRetrieveUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Read) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let uc = match retrieve_uc {
+        Some(uc) => uc,
+        None => {
+            return ToolCallResult::error(
+                "Motor de recuperación híbrida no inicializado en el servidor MCP".to_string(),
+            );
+        }
+    };
+
+    let query_str = match args.get("query").and_then(|v| v.as_str()) {
+        Some(q) if !q.trim().is_empty() => q.trim(),
+        _ => {
+            return ToolCallResult::error(
+                "El argumento 'query' es obligatorio y no puede estar vacío".to_string(),
+            );
+        }
+    };
+
+    let mut query = HybridRetrieveQuery::new(query_str);
+
+    if let Some(project) = args.get("project").and_then(|v| v.as_str()) {
+        query.project = Some(project.to_string());
+    }
+
+    if let Some(type_str) = args.get("memory_type").and_then(|v| v.as_str()) {
+        match parse_memory_type(type_str) {
+            Some(mtype) => query.memory_type = Some(mtype),
+            None => {
+                return ToolCallResult::error(format!("Tipo de memoria inválido '{type_str}'"));
+            }
+        }
+    }
+
+    if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+        query.limit = Some(limit as usize);
+    }
+
+    if let Some(min_score) = args.get("min_score").and_then(|v| v.as_f64()) {
+        query.min_score = Some(min_score as f32);
+    }
+
+    if let Some(explain) = args.get("explain").and_then(|v| v.as_bool()) {
+        query.explain = explain;
+    }
+
+    match uc.execute(query).await {
+        Ok(result) => ToolCallResult::success(result.assembled_context),
+        Err(e) => {
+            error!(error = %e, "Fallo al ejecutar HybridRetrieveUseCase vía MCP");
+            ToolCallResult::error(format!("Error en recuperación híbrida: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1590,5 +1693,70 @@ mod tests {
         .await;
         assert!(ro_res.is_error);
         assert!(ro_res.content[0].text.contains("Permiso denegado"));
+    }
+
+    #[tokio::test]
+    async fn test_retrieve_tool_flow() {
+        use brain_domain::model::{Memory, MemoryContent, Provenance};
+        use brain_domain::ports::{
+            EmbeddingProvider, InMemoryEmbeddingProvider, InMemoryVectorRepository,
+            MemoryRepository, VectorRepository,
+        };
+        use brain_retrieval::{InMemoryFullTextSearchRepository, RetrievalConfig};
+
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let vec_repo = Arc::new(InMemoryVectorRepository::new());
+        let emb_provider = Arc::new(InMemoryEmbeddingProvider::new());
+        let fts_repo = Arc::new(InMemoryFullTextSearchRepository::new());
+
+        let prov = Provenance::new(brain_domain::model::MemoryOrigin::Observation);
+        let m = Memory::new_episodic(
+            MemoryContent::new("Hexagonal Clean Architecture in Rust").unwrap(),
+            prov,
+            Some("local-brain".to_string()),
+        );
+        let id = m.id;
+        mem_repo.save(&m).await.unwrap();
+
+        let vec = emb_provider
+            .embed("Hexagonal Clean Architecture in Rust")
+            .await
+            .unwrap();
+        vec_repo.store_embedding(&id, &vec).await.unwrap();
+        fts_repo.index_document(id, "Hexagonal Clean Architecture in Rust");
+
+        let retrieve_uc = Arc::new(HybridRetrieveUseCase::new(
+            mem_repo,
+            vec_repo,
+            emb_provider,
+            fts_repo,
+            None,
+            RetrievalConfig::default(),
+        ));
+
+        let policy = McpSecurityPolicy::new_full();
+
+        // 1. Invocación exitosa
+        let args = json!({
+            "query": "Hexagonal Rust",
+            "project": "local-brain",
+            "explain": true
+        });
+
+        let res = execute_retrieve(args, Some(retrieve_uc.clone()), &policy).await;
+        assert!(!res.is_error);
+        let text = &res.content[0].text;
+        assert!(text.contains("<untrusted_memory_context>"));
+        assert!(text.contains("Hexagonal Clean Architecture in Rust"));
+        assert!(text.contains("Score:"));
+
+        // 2. Query vacía produce error
+        let bad_args = json!({ "query": "   " });
+        let bad_res = execute_retrieve(bad_args, Some(retrieve_uc), &policy).await;
+        assert!(bad_res.is_error);
+
+        // 3. Verifica que list_tools incluye brain_retrieve
+        let tools = list_tools();
+        assert!(tools.iter().any(|t| t.name == "brain_retrieve"));
     }
 }

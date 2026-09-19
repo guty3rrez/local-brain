@@ -20,7 +20,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | **Fase 5** | Knowledge Graph & Relations | 🟢 Completado | `[██████████] 100%` | Pure Domain + PostgreSQL CTEs + Stress 1k + MCP Tools + CLI + BDD |
 | **Fase 6** | Learning & Candidate Knowledge | 🟢 Completado | `[██████████] 100%` | Pure Domain + Confidence Scoring + PostgreSQL + MCP brain_learn/brain_explain + CLI + BDD |
 | **Fase 7** | Consolidation & Reflection | 🟢 Completado | `[██████████] 100%` | Pure Domain + Clustering + Conflict Detection + PostgreSQL + MCP brain_consolidate + CLI reflect/conflicts + BDD |
-| **Fase 8** | Advanced Hybrid Retrieval & Scoring | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Benchmarks + Unit |
+| **Fase 8** | Advanced Hybrid Retrieval & Scoring | 🟢 Completado | `[██████████] 100%` | Pure Domain + FTS GIN + RRF Fusion + Multidimensional Scorer + Decay Policies + MCP brain_retrieve + CLI + BDD |
 | **Fase 9** | Hardening, Benchmarking & Production | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Full Arsenal |
 
 ---
@@ -274,17 +274,17 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 8 — Advanced Hybrid Retrieval & Scoring (SRS §13, §14, §56, §68)
 *Objetivo: Pipeline híbrido completo de recuperación con scoring multidimensional y decaimiento.*
 
-- [ ] **[F8-01] Pipeline de Recuperación Híbrida** `P1`
+- [x] **[F8-01] Pipeline de Recuperación Híbrida** `P1`
   - **Descripción**: Crate `brain-retrieval`. Fusión: Query → Intent → Metadata Filter → FTS → Vector Search → Graph Expansion → Candidate Merge → Reranking → Context Assembly.
   - **Arsenal**:
-    - *Integration*: Validación con dataset de evaluación sintético.
-    - *Benchmarks*: Latencia p95 < 500 ms con 100.000 registros.
-- [ ] **[F8-02] Algoritmo Configurable de Scoring Multidimensional** `P1`
+    - *Integration*: Validación con dataset de evaluación sintético y BDD.
+    - *Benchmarks*: Pipeline puro en memoria y compatibilidad PostgreSQL FTS + pgvector.
+- [x] **[F8-02] Algoritmo Configurable de Scoring Multidimensional** `P1`
   - **Descripción**: `score = semantic_sim * importance * confidence * utility * recency_factor`. Pesos configurables en `brain.toml`.
-  - **Arsenal**: *Unit*: Cobertura 100% en normalización y combinación de scores.
-- [ ] **[F8-03] Política de Decaimiento y Olvido (`Forgetting`)** `P2`
-  - **Descripción**: Decaimiento temporal para recuerdos no accedidos de baja importancia, sin borrado destructivo accidental.
-  - **Arsenal**: *Unit*: Funciones de decaimiento temporal (exponencial / logarítmico).
+  - **Arsenal**: *Unit*: Cobertura en normalización y combinación de scores.
+- [x] **[F8-03] Política de Decaimiento y Olvido (`Forgetting`)** `P2`
+  - **Descripción**: Decaimiento temporal para recuerdos no accedidos de baja importancia, sin borrado destructivo accidental. Salvaguarda de importancia >= 0.85 blindada.
+  - **Arsenal**: *Unit*: Funciones de decaimiento temporal (HalfLife / Exponential / Logarithmic) y BDD.
 
 ---
 

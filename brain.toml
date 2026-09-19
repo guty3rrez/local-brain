@@ -1,0 +1,43 @@
+# 🧠 Local Brain — Configuración de Recuperación Híbrida y Scoring (SRS §13, §14, §56, §58)
+
+[fusion]
+# Ponderación del canal vectorial semántico denso (pgvector HNSW)
+vector_weight = 0.50
+# Ponderación del canal léxico full-text (PostgreSQL tsvector / plainto_tsquery)
+fts_weight = 0.30
+# Ponderación del canal de expansión de grafo de conocimiento
+graph_weight = 0.20
+# Constante de suavizado para Reciprocal Rank Fusion (RRF)
+rrf_k = 60.0
+
+[scoring]
+# Ponderaciones multidimensionales normalizadas (SRS §14)
+semantic_weight = 0.40
+importance_weight = 0.25
+confidence_weight = 0.20
+utility_weight = 0.15
+recency_weight = 0.10
+
+[decay]
+# Estrategia de decaimiento: "half_life", "exponential", "logarithmic", o "none"
+strategy = "half_life"
+# Días para que la recencia caiga al 50%
+half_life_days = 30.0
+# Tasa lambda para decaimiento exponencial
+lambda = 0.023
+# Piso mínimo al que puede decaer un recuerdo no protegido
+min_decay_factor = 0.10
+# Umbral de importancia intrínseca para salvaguarda total contra decaimiento (SRS §58)
+protected_importance_threshold = 0.85
+
+[limits]
+# Límite por defecto de recuerdos devueltos
+default_limit = 10
+# Límite máximo admisible
+max_limit = 100
+# Score mínimo admisible en el ranking final
+min_score = 0.05
+# Profundidad máxima de saltos en el grafo para expansión
+graph_max_depth = 1
+# Cantidad máxima de nodos a expandir desde el grafo
+graph_expansion_limit = 5

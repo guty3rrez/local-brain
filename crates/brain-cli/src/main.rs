@@ -12,10 +12,10 @@ use sqlx::Row;
 
 use brain_application::{
     ConsolidateUseCase, EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery, ExplainUseCase,
-    ForgetUseCase, LearnCommand, LearnUseCase, ListConflictsQuery, ListConflictsUseCase,
-    PurgeExpiredUseCase, RecallQuery, RecallUseCase, ReflectCommand, ReflectUseCase, RelateCommand,
-    RelateUseCase, RememberCommand, RememberUseCase, ResolveConflictCommand,
-    ResolveConflictUseCase, TraverseGraphQuery, TraverseGraphUseCase,
+    ForgetUseCase, HybridRetrieveQuery, HybridRetrieveUseCase, LearnCommand, LearnUseCase,
+    ListConflictsQuery, ListConflictsUseCase, PurgeExpiredUseCase, RecallQuery, RecallUseCase,
+    ReflectCommand, ReflectUseCase, RelateCommand, RelateUseCase, RememberCommand, RememberUseCase,
+    ResolveConflictCommand, ResolveConflictUseCase, TraverseGraphQuery, TraverseGraphUseCase,
 };
 use brain_consolidation::in_memory::{InMemoryConflictRepository, MockConsolidationLlm};
 use brain_consolidation::model::ConflictId;
@@ -34,6 +34,10 @@ use brain_infrastructure::{
 };
 use brain_learning::{EvidenceSourceType, InMemoryLearningRepository, LearningRepository};
 use brain_mcp::{McpSecurityPolicy, McpServer};
+use brain_retrieval::{
+    calculate_decay_factor, FullTextSearchRepository, InMemoryFullTextSearchRepository,
+    RetrievalConfig,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -102,6 +106,57 @@ enum Commands {
 
     /// Gestiona y resuelve contradicciones cognitivas y conflictos de conocimiento (SRS §18, Fase 7)
     Conflicts(ConflictsArgs),
+
+    /// Recuperación híbrida avanzada combinando vectores, FTS, grafo y scoring con decaimiento (SRS §13, §14, §56, §58, Fase 8)
+    Retrieve(RetrieveArgs),
+
+    /// Previsualiza el impacto del decaimiento temporal y políticas de olvido sin alterar datos (SRS §58, Fase 8)
+    DecayPreview(DecayPreviewArgs),
+}
+
+#[derive(Args, Debug)]
+struct RetrieveArgs {
+    /// Consulta o intención de búsqueda semántica y léxica
+    query: String,
+
+    /// Filtro opcional por proyecto
+    #[arg(short, long)]
+    project: Option<String>,
+
+    /// Filtro opcional por tipo de memoria
+    #[arg(short = 't', long = "type", value_enum)]
+    memory_type: Option<CliMemoryType>,
+
+    /// Cantidad máxima de recuerdos relevantes a retornar (por defecto 10)
+    #[arg(short = 'n', long = "limit", default_value_t = 10)]
+    limit: usize,
+
+    /// Puntaje mínimo de corte para admitir recuerdos en el ranking final
+    #[arg(short = 'm', long = "min-score")]
+    min_score: Option<f32>,
+
+    /// Si se especifica, desglosa el cálculo matemático de scoring y señales de ranking (SRS §57)
+    #[arg(short = 'e', long = "explain")]
+    explain: bool,
+
+    /// Ruta opcional a un archivo de configuración brain.toml personalizado
+    #[arg(short = 'c', long = "config")]
+    config: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct DecayPreviewArgs {
+    /// Filtro opcional por proyecto
+    #[arg(short, long)]
+    project: Option<String>,
+
+    /// Cantidad máxima de recuerdos a analizar
+    #[arg(short = 'n', long = "limit", default_value_t = 20)]
+    limit: usize,
+
+    /// Ruta opcional a un archivo de configuración brain.toml personalizado
+    #[arg(short = 'c', long = "config")]
+    config: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -504,6 +559,7 @@ struct AppContext {
     memory_repo: Arc<dyn MemoryRepository>,
     vector_repo: Arc<dyn VectorRepository>,
     embedding_provider: Arc<dyn EmbeddingProvider>,
+    fts_repo: Arc<dyn FullTextSearchRepository>,
     graph_repo: Arc<dyn GraphRepository>,
     learning_repo: Arc<dyn LearningRepository>,
     conflict_repo: Arc<dyn ConflictRepository>,
@@ -520,6 +576,7 @@ async fn build_context(
             memory_repo: Arc::new(InMemoryMemoryRepository::new()),
             vector_repo: Arc::new(InMemoryVectorRepository::new()),
             embedding_provider: Arc::new(InMemoryEmbeddingProvider::new()),
+            fts_repo: Arc::new(InMemoryFullTextSearchRepository::new()),
             graph_repo: Arc::new(InMemoryGraphRepository::new()),
             learning_repo: Arc::new(InMemoryLearningRepository::new()),
             conflict_repo: Arc::new(InMemoryConflictRepository::new()),
@@ -548,8 +605,9 @@ async fn build_context(
 
         Ok(AppContext {
             memory_repo: pg_repo.clone(),
-            vector_repo: pg_repo,
+            vector_repo: pg_repo.clone(),
             embedding_provider: emb_provider,
+            fts_repo: pg_repo,
             graph_repo,
             learning_repo,
             conflict_repo,
@@ -1091,6 +1149,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
                 .with_learning_repository(Some(ctx.learning_repo.clone())),
             );
+            let retrieve_uc = Arc::new(HybridRetrieveUseCase::new(
+                ctx.memory_repo.clone(),
+                ctx.vector_repo.clone(),
+                ctx.embedding_provider.clone(),
+                ctx.fts_repo.clone(),
+                Some(ctx.graph_repo.clone()),
+                RetrievalConfig::default(),
+            ));
 
             let security = if args.read_only {
                 McpSecurityPolicy::new_read_only()
@@ -1104,7 +1170,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .with_expire_session_uc(expire_session_uc)
                 .with_graph(relate_uc, traverse_uc)
                 .with_learning(learn_uc, explain_uc)
-                .with_consolidation(reflect_uc, consolidate_uc);
+                .with_consolidation(reflect_uc, consolidate_uc)
+                .with_retrieve_uc(retrieve_uc);
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ Error en servidor MCP: {e}");
                 std::process::exit(1);
@@ -1571,6 +1638,244 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             std::process::exit(1);
                         }
                     }
+                }
+            }
+        }
+
+        Commands::Retrieve(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let config = if let Some(ref path) = args.config {
+                match std::fs::read_to_string(path) {
+                    Ok(content) => match RetrievalConfig::from_toml(&content) {
+                        Ok(cfg) => cfg,
+                        Err(e) => {
+                            eprintln!("❌ Error en archivo de configuración '{path}': {e}");
+                            std::process::exit(1);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("❌ No se pudo leer archivo de configuración '{path}': {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if std::path::Path::new("brain.toml").exists() {
+                match std::fs::read_to_string("brain.toml") {
+                    Ok(content) => RetrievalConfig::from_toml(&content).unwrap_or_default(),
+                    Err(_) => RetrievalConfig::default(),
+                }
+            } else {
+                RetrievalConfig::default()
+            };
+
+            let use_case = HybridRetrieveUseCase::new(
+                ctx.memory_repo,
+                ctx.vector_repo,
+                ctx.embedding_provider,
+                ctx.fts_repo,
+                Some(ctx.graph_repo),
+                config,
+            );
+
+            let mut query = HybridRetrieveQuery::new(args.query.clone())
+                .with_limit(args.limit)
+                .with_explain(args.explain);
+
+            if let Some(proj) = args.project {
+                query = query.with_project(proj);
+            }
+            if let Some(mtype) = args.memory_type {
+                query = query.with_type(mtype.into());
+            }
+            if let Some(min_score) = args.min_score {
+                query = query.with_min_score(min_score);
+            }
+
+            match use_case.execute(query).await {
+                Ok(result) => {
+                    println!("🧠 Local Brain — Recuperación Híbrida Avanzada (SRS §13, §14, §56)");
+                    println!("─────────────────────────────────────────────────────────────────────────────");
+                    println!("Consulta:           \"{}\"", args.query);
+                    println!(
+                        "Candidatos:         {} únicos (Vector: {}, FTS: {}, Grafo: {})",
+                        result.metrics.merged_unique_count,
+                        result.metrics.vector_candidates_count,
+                        result.metrics.fts_candidates_count,
+                        result.metrics.graph_candidates_count
+                    );
+                    println!("Recuerdos devueltos: {}", result.items.len());
+                    println!("─────────────────────────────────────────────────────────────────────────────");
+
+                    if result.items.is_empty() {
+                        println!("ℹ️ No se encontraron recuerdos relevantes que superen los umbrales configurados.");
+                    } else {
+                        for (idx, item) in result.items.iter().enumerate() {
+                            let rank = idx + 1;
+                            println!(
+                                "\n[{}] Score: {:.4} | ID: {} | Tipo: {:?}",
+                                rank,
+                                item.explanation.final_score,
+                                item.memory.id,
+                                item.memory.memory_type
+                            );
+                            if let Some(ref proj) = item.memory.project {
+                                println!("    Proyecto:    {}", proj);
+                            }
+                            println!(
+                                "    Factores:    Similitud: {:.2} | Importancia: {:.2} | Confianza: {:.2} | Recencia: {:.2}",
+                                item.explanation.semantic_similarity,
+                                item.explanation.importance,
+                                item.explanation.confidence,
+                                item.explanation.recency_factor
+                            );
+                            if args.explain {
+                                println!(
+                                    "    Explicación: {}",
+                                    item.explanation.to_formatted_summary()
+                                );
+                                if !item.explanation.signals.is_empty() {
+                                    println!(
+                                        "    Señales:     {}",
+                                        item.explanation.signals.join(", ")
+                                    );
+                                }
+                            }
+                            let preview = item.memory.content.text().trim();
+                            let truncated = if preview.len() > 180 {
+                                format!("{}...", &preview[..180])
+                            } else {
+                                preview.to_string()
+                            };
+                            println!("    Contenido:   {}", truncated);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error durante la recuperación híbrida: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::DecayPreview(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let config = if let Some(ref path) = args.config {
+                match std::fs::read_to_string(path) {
+                    Ok(content) => match RetrievalConfig::from_toml(&content) {
+                        Ok(cfg) => cfg,
+                        Err(e) => {
+                            eprintln!("❌ Error en archivo de configuración '{path}': {e}");
+                            std::process::exit(1);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("❌ No se pudo leer archivo de configuración '{path}': {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else if std::path::Path::new("brain.toml").exists() {
+                match std::fs::read_to_string("brain.toml") {
+                    Ok(content) => RetrievalConfig::from_toml(&content).unwrap_or_default(),
+                    Err(_) => RetrievalConfig::default(),
+                }
+            } else {
+                RetrievalConfig::default()
+            };
+
+            let memories = if let Some(ref proj) = args.project {
+                ctx.memory_repo.find_by_project(proj, args.limit).await
+            } else {
+                ctx.memory_repo
+                    .find_by_status(MemoryStatus::Active, args.limit)
+                    .await
+            };
+
+            match memories {
+                Ok(list) => {
+                    let now = chrono::Utc::now();
+                    println!(
+                        "🧠 Local Brain — Auditoría de Decaimiento Temporal y Olvido (SRS §58)"
+                    );
+                    println!("─────────────────────────────────────────────────────────────────────────────");
+                    println!(
+                        "Estrategia:     {:?} (Vida media: {} días | Umbral protegido: >= {})",
+                        config.decay.strategy,
+                        config.decay.half_life_days,
+                        config.decay.protected_importance_threshold
+                    );
+                    println!("Recuerdos evaluados: {}", list.len());
+                    println!("─────────────────────────────────────────────────────────────────────────────");
+
+                    if list.is_empty() {
+                        println!("ℹ️ No hay recuerdos activos para evaluar.");
+                    } else {
+                        for m in &list {
+                            let factor = calculate_decay_factor(
+                                m.created_at,
+                                m.last_retrieved_at,
+                                now,
+                                m.importance.value(),
+                                m.confidence.value(),
+                                m.utility.value(),
+                                &config.decay,
+                            );
+
+                            let is_protected =
+                                m.importance.value() >= config.decay.protected_importance_threshold;
+                            let status_badge = if is_protected {
+                                "🛡️ PROTEGIDO (Decisión clave)"
+                            } else if factor < 0.5 {
+                                "⏳ DECAÍDO (Baja recencia)"
+                            } else {
+                                "⚡ ACTIVO"
+                            };
+
+                            let last_interaction = m.last_retrieved_at.unwrap_or(m.created_at);
+                            let days_inactive =
+                                (now.signed_duration_since(last_interaction).num_seconds() as f32
+                                    / 86400.0)
+                                    .max(0.0);
+
+                            println!(
+                                "• ID: {} | Tipo: {:?} | {}",
+                                m.id, m.memory_type, status_badge
+                            );
+                            println!(
+                                "  Importancia: {:.2} | Confianza: {:.2} | Inactivo: {:.1} días | Factor Decaimiento: {:.3}",
+                                m.importance.value(),
+                                m.confidence.value(),
+                                days_inactive,
+                                factor
+                            );
+                            let snippet = m.content.text().trim();
+                            let preview = if snippet.len() > 100 {
+                                format!("{}...", &snippet[..100])
+                            } else {
+                                snippet.to_string()
+                            };
+                            println!("  Resumen:     {}", preview);
+                            println!();
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error al cargar recuerdos para auditoría de decaimiento: {e}");
+                    std::process::exit(1);
                 }
             }
         }

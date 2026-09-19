@@ -5,8 +5,9 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tracing::{debug, info};
 
 use brain_application::{
-    ConsolidateUseCase, ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, LearnUseCase,
-    RecallUseCase, ReflectUseCase, RelateUseCase, RememberUseCase, TraverseGraphUseCase,
+    ConsolidateUseCase, ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, HybridRetrieveUseCase,
+    LearnUseCase, RecallUseCase, ReflectUseCase, RelateUseCase, RememberUseCase,
+    TraverseGraphUseCase,
 };
 use brain_core::CORE_VERSION;
 
@@ -17,8 +18,8 @@ use crate::protocol::{
 use crate::security::McpSecurityPolicy;
 use crate::tools::{
     execute_consolidate, execute_explain, execute_forget, execute_graph, execute_learn,
-    execute_recall, execute_relate, execute_remember, execute_search, execute_session_end,
-    list_tools,
+    execute_recall, execute_relate, execute_remember, execute_retrieve, execute_search,
+    execute_session_end, list_tools,
 };
 
 /// Servidor MCP de Local Brain.
@@ -34,6 +35,7 @@ pub struct McpServer {
     explain_uc: Option<Arc<ExplainUseCase>>,
     reflect_uc: Option<Arc<ReflectUseCase>>,
     consolidate_uc: Option<Arc<ConsolidateUseCase>>,
+    retrieve_uc: Option<Arc<HybridRetrieveUseCase>>,
     security: McpSecurityPolicy,
 }
 
@@ -56,6 +58,7 @@ impl McpServer {
             explain_uc: None,
             reflect_uc: None,
             consolidate_uc: None,
+            retrieve_uc: None,
             security,
         }
     }
@@ -96,6 +99,12 @@ impl McpServer {
     ) -> Self {
         self.reflect_uc = Some(reflect_uc);
         self.consolidate_uc = Some(consolidate_uc);
+        self
+    }
+
+    /// Adjunta el caso de uso de recuperación híbrida avanzada (SRS §13, §14, §56, §58, F8-01).
+    pub fn with_retrieve_uc(mut self, retrieve_uc: Arc<HybridRetrieveUseCase>) -> Self {
+        self.retrieve_uc = Some(retrieve_uc);
         self
     }
 
@@ -202,6 +211,9 @@ impl McpServer {
                             &self.security,
                         )
                         .await
+                    }
+                    "brain_retrieve" => {
+                        execute_retrieve(arguments, self.retrieve_uc.clone(), &self.security).await
                     }
                     _ => {
                         return Some(JsonRpcResponse::error(
