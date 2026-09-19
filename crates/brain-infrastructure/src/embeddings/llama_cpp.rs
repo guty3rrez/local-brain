@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde::Serialize;
 use tracing::{debug, error, instrument};
 
-use brain_domain::model::DomainError;
+use brain_domain::model::{DomainError, OfflinePolicy};
 use brain_domain::ports::{EmbeddingProvider, DEFAULT_EMBEDDING_DIMENSION};
 
 /// Configuración para el cliente local de embeddings llama.cpp (SRS §12.2, §26).
@@ -19,6 +19,8 @@ pub struct LlamaCppConfig {
     pub timeout: Duration,
     /// Dimensión esperada del vector (por defecto 768).
     pub expected_dimension: usize,
+    /// Política de aislamiento offline para prevenir fugas de red externa.
+    pub offline_policy: Option<OfflinePolicy>,
 }
 
 impl Default for LlamaCppConfig {
@@ -27,6 +29,7 @@ impl Default for LlamaCppConfig {
             endpoint: "http://127.0.0.1:8081/embedding".to_string(),
             timeout: Duration::from_secs(3),
             expected_dimension: DEFAULT_EMBEDDING_DIMENSION,
+            offline_policy: Some(OfflinePolicy::strict()),
         }
     }
 }
@@ -48,6 +51,11 @@ impl LlamaCppConfig {
         self.expected_dimension = dimension;
         self
     }
+
+    pub fn with_offline_policy(mut self, policy: OfflinePolicy) -> Self {
+        self.offline_policy = Some(policy);
+        self
+    }
 }
 
 /// Adaptador HTTP que implementa `EmbeddingProvider` comunicándose con `llama.cpp`.
@@ -59,6 +67,10 @@ pub struct LlamaCppEmbeddingProvider {
 
 impl LlamaCppEmbeddingProvider {
     pub fn new(config: LlamaCppConfig) -> Result<Self, DomainError> {
+        if let Some(ref policy) = config.offline_policy {
+            policy.validate_url(&config.endpoint)?;
+        }
+
         let client = Client::builder()
             .timeout(config.timeout)
             .build()
@@ -96,6 +108,10 @@ impl EmbeddingProvider for LlamaCppEmbeddingProvider {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(DomainError::EmptyContent);
+        }
+
+        if let Some(ref policy) = self.config.offline_policy {
+            policy.validate_url(&self.config.endpoint)?;
         }
 
         let body = LlamaRequest {

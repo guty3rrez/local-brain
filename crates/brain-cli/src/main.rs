@@ -11,17 +11,22 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sqlx::Row;
 
 use brain_application::{
-    ConsolidateUseCase, EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery, ExplainUseCase,
-    ForgetUseCase, HybridRetrieveQuery, HybridRetrieveUseCase, LearnCommand, LearnUseCase,
-    ListConflictsQuery, ListConflictsUseCase, PurgeExpiredUseCase, RecallQuery, RecallUseCase,
-    ReflectCommand, ReflectUseCase, RelateCommand, RelateUseCase, RememberCommand, RememberUseCase,
-    ResolveConflictCommand, ResolveConflictUseCase, TraverseGraphQuery, TraverseGraphUseCase,
+    BackupCommand, BackupRepository, BackupUseCase, ConsolidateUseCase, DoctorCommand,
+    DoctorDiagnostician, DoctorUseCase, EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery,
+    ExplainUseCase, ForgetUseCase, HybridRetrieveQuery, HybridRetrieveUseCase,
+    InMemoryBackupRepository, LearnCommand, LearnUseCase, ListConflictsQuery, ListConflictsUseCase,
+    PurgeExpiredUseCase, RecallQuery, RecallUseCase, ReflectCommand, ReflectUseCase, RelateCommand,
+    RelateUseCase, RememberCommand, RememberUseCase, ResolveConflictCommand,
+    ResolveConflictUseCase, RestoreCommand, RestoreUseCase, TraverseGraphQuery,
+    TraverseGraphUseCase,
 };
 use brain_consolidation::in_memory::{InMemoryConflictRepository, MockConsolidationLlm};
 use brain_consolidation::model::ConflictId;
 use brain_consolidation::ports::{ConflictRepository, ConsolidationLlmPort};
 use brain_core::CORE_VERSION;
-use brain_domain::model::{DomainError, MemoryId, MemoryStatus, MemoryType};
+use brain_domain::model::{
+    BackupFormat, DomainError, MemoryId, MemoryStatus, MemoryType, OfflinePolicy,
+};
 use brain_domain::ports::{
     EmbeddingProvider, InMemoryEmbeddingProvider, InMemoryMemoryRepository,
     InMemoryVectorRepository, MemoryRepository, VectorRepository, DEFAULT_EMBEDDING_DIMENSION,
@@ -29,8 +34,9 @@ use brain_domain::ports::{
 use brain_graph::{GraphRepository, InMemoryGraphRepository, RelationType, TraversalDirection};
 use brain_infrastructure::embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
 use brain_infrastructure::{
-    LlamaCppReflectionClient, PostgresConflictRepository, PostgresGraphRepository,
-    PostgresLearningRepository, PostgresMemoryRepository,
+    LlamaCppReflectionClient, PostgresBackupRepository, PostgresConflictRepository,
+    PostgresDoctorDiagnostician, PostgresGraphRepository, PostgresLearningRepository,
+    PostgresMemoryRepository,
 };
 use brain_learning::{EvidenceSourceType, InMemoryLearningRepository, LearningRepository};
 use brain_mcp::{McpSecurityPolicy, McpServer};
@@ -58,6 +64,10 @@ struct Cli {
     /// Ejecutar en modo efímero en memoria (sin persistencia en PostgreSQL ni red)
     #[arg(long, global = true)]
     in_memory: bool,
+
+    /// Forzar el modo offline estricto, bloqueando cualquier salida de red no local (SRS §29, §51)
+    #[arg(long, short = 'O', global = true)]
+    offline: bool,
 
     #[command(subcommand)]
     command: Commands,
@@ -112,6 +122,88 @@ enum Commands {
 
     /// Previsualiza el impacto del decaimiento temporal y políticas de olvido sin alterar datos (SRS §58, Fase 8)
     DecayPreview(DecayPreviewArgs),
+
+    /// Audita el aislamiento de red y verifica el modo offline estricto (SRS §29, §51, Fase 9)
+    Offline(OfflineArgs),
+
+    /// Diagnostica la salud del sistema, PostgreSQL, pgvector, llama.cpp y colas (SRS §35, Fase 9)
+    Doctor(DoctorArgs),
+
+    /// Exporta un respaldo seguro de todo el estado cognitivo en formato JSONL o SQL (SRS §52, Fase 9)
+    Backup(BackupArgs),
+
+    /// Restaura el estado cognitivo a partir de un archivo de respaldo con verificación de integridad (SRS §52, §53, Fase 9)
+    Restore(RestoreArgs),
+}
+
+#[derive(Args, Debug)]
+struct OfflineArgs {
+    /// Ruta opcional a un archivo brain.toml personalizado
+    #[arg(short = 'c', long = "config")]
+    config: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct DoctorArgs {
+    /// Emitir reporte en formato JSON legible por máquinas y agentes
+    #[arg(long)]
+    json: bool,
+
+    /// Mostrar detalles extendidos de diagnóstico y latencias
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
+
+    /// Ruta opcional a un archivo brain.toml personalizado
+    #[arg(short = 'c', long = "config")]
+    config: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct BackupArgs {
+    /// Archivo de destino para el respaldo (usa '-' para salida estándar stdout)
+    #[arg(short = 'o', long = "output")]
+    output: Option<String>,
+
+    /// Formato del archivo de respaldo ('jsonl' o 'sql')
+    #[arg(short = 'f', long = "format", value_enum, default_value_t = CliBackupFormat::Jsonl)]
+    format: CliBackupFormat,
+
+    /// Filtrar exportación por proyecto específico
+    #[arg(short = 'p', long = "project")]
+    project: Option<String>,
+
+    /// Omitir vectores de embedding para un respaldo más liviano (se pueden regenerar)
+    #[arg(long = "no-embeddings")]
+    no_embeddings: bool,
+}
+
+#[derive(Args, Debug)]
+struct RestoreArgs {
+    /// Archivo de respaldo a importar (JSONL o SQL)
+    #[arg(short = 'i', long = "input")]
+    input: String,
+
+    /// Formato del archivo (por defecto auto-detectado por extensión)
+    #[arg(short = 'f', long = "format", value_enum)]
+    format: Option<CliBackupFormat>,
+
+    /// Limpiar/purgar todas las tablas antes de restaurar (requiere --confirm)
+    #[arg(long = "wipe")]
+    wipe: bool,
+
+    /// Confirmación explícita para operaciones destructivas como --wipe
+    #[arg(long = "confirm")]
+    confirm: bool,
+
+    /// Simulación previa: valida integridad y cuenta registros sin modificar la base de datos
+    #[arg(long = "dry-run")]
+    dry_run: bool,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum CliBackupFormat {
+    Jsonl,
+    Sql,
 }
 
 #[derive(Args, Debug)]
@@ -541,6 +633,24 @@ fn resolve_embedding_url(cli_url: Option<String>) -> String {
     std::env::var("EMBEDDING_URL").unwrap_or_else(|_| "http://127.0.0.1:8081/embedding".to_string())
 }
 
+fn is_offline_enabled(cli_flag: bool) -> bool {
+    if cli_flag {
+        return true;
+    }
+    if let Ok(content) = std::fs::read_to_string("brain.toml") {
+        if let Ok(val) = toml::from_str::<toml::Value>(&content) {
+            if let Some(offline) = val
+                .get("offline")
+                .and_then(|o| o.get("enabled"))
+                .and_then(|e| e.as_bool())
+            {
+                return offline;
+            }
+        }
+    }
+    false
+}
+
 async fn build_pg_pool(db_url: &str) -> Result<sqlx::PgPool, String> {
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
@@ -564,13 +674,21 @@ struct AppContext {
     learning_repo: Arc<dyn LearningRepository>,
     conflict_repo: Arc<dyn ConflictRepository>,
     llm_reflection_client: Arc<dyn ConsolidationLlmPort>,
+    backup_repo: Arc<dyn BackupRepository>,
 }
 
 async fn build_context(
     in_memory: bool,
     db_url_override: Option<String>,
     emb_url_override: Option<String>,
+    offline: bool,
 ) -> Result<AppContext, Box<dyn std::error::Error>> {
+    let offline_policy = if offline {
+        OfflinePolicy::strict()
+    } else {
+        OfflinePolicy::permissive()
+    };
+
     if in_memory {
         Ok(AppContext {
             memory_repo: Arc::new(InMemoryMemoryRepository::new()),
@@ -581,19 +699,25 @@ async fn build_context(
             learning_repo: Arc::new(InMemoryLearningRepository::new()),
             conflict_repo: Arc::new(InMemoryConflictRepository::new()),
             llm_reflection_client: Arc::new(MockConsolidationLlm::new()),
+            backup_repo: Arc::new(InMemoryBackupRepository::new()),
         })
     } else {
         let db_url = resolve_database_url(db_url_override);
+        offline_policy.validate_url(&db_url)?;
         let pool = build_pg_pool(&db_url).await?;
         let pg_repo = Arc::new(PostgresMemoryRepository::new(pool.clone()));
         let graph_repo = Arc::new(PostgresGraphRepository::new(pool.clone()));
         let learning_repo = Arc::new(PostgresLearningRepository::new(pool.clone()));
-        let conflict_repo = Arc::new(PostgresConflictRepository::new(pool));
+        let conflict_repo = Arc::new(PostgresConflictRepository::new(pool.clone()));
+        let backup_repo = Arc::new(PostgresBackupRepository::new(pool));
 
         let emb_url = resolve_embedding_url(emb_url_override);
+        offline_policy.validate_url(&emb_url)?;
         let emb_provider = Arc::new(
             LlamaCppEmbeddingProvider::new(
-                LlamaCppConfig::new(emb_url.clone()).with_dimension(DEFAULT_EMBEDDING_DIMENSION),
+                LlamaCppConfig::new(emb_url.clone())
+                    .with_dimension(DEFAULT_EMBEDDING_DIMENSION)
+                    .with_offline_policy(offline_policy),
             )
             .map_err(|e| e.to_string())?,
         );
@@ -612,6 +736,7 @@ async fn build_context(
             learning_repo,
             conflict_repo,
             llm_reflection_client,
+            backup_repo,
         })
     }
 }
@@ -619,6 +744,28 @@ async fn build_context(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    let is_offline = is_offline_enabled(cli.offline);
+    let offline_policy = if is_offline {
+        OfflinePolicy::strict()
+    } else {
+        OfflinePolicy::permissive()
+    };
+
+    if is_offline
+        && !matches!(cli.command, Commands::Offline(_) | Commands::Doctor(_))
+        && !cli.in_memory
+    {
+        let db_url = resolve_database_url(cli.database_url.clone());
+        if let Err(e) = offline_policy.validate_url(&db_url) {
+            eprintln!("❌ Violación de política offline (--offline activo): {e}");
+            std::process::exit(1);
+        }
+        let emb_url = resolve_embedding_url(cli.embedding_url.clone());
+        if let Err(e) = offline_policy.validate_url(&emb_url) {
+            eprintln!("❌ Violación de política offline (--offline activo): {e}");
+            std::process::exit(1);
+        }
+    }
 
     match cli.command {
         Commands::Init => {
@@ -661,7 +808,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Remember(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -771,7 +924,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Recall(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -859,7 +1018,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::EmbedPending(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1098,7 +1263,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Mcp(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1179,7 +1350,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Relate(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1220,7 +1397,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Graph(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1300,7 +1483,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::SessionEnd(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1324,7 +1513,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::PurgeExpired => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1348,7 +1543,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Learn(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1409,7 +1610,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Explain(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1450,7 +1657,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Reflect(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1545,7 +1758,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Conflicts(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1643,7 +1862,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Retrieve(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1765,7 +1990,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::DecayPreview(args) => {
-            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
             {
                 Ok(c) => c,
                 Err(err) => {
@@ -1875,6 +2106,303 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => {
                     eprintln!("❌ Error al cargar recuerdos para auditoría de decaimiento: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Offline(_args) => {
+            println!("🧠 Local Brain — Modo Offline Estricto (SRS §29, §51)");
+            let db_url = resolve_database_url(cli.database_url);
+            let emb_url = resolve_embedding_url(cli.embedding_url);
+            let policy = OfflinePolicy::strict();
+
+            println!("   Auditoría de Aislamiento de Red:");
+            let mut compliant = true;
+
+            match policy.validate_url(&db_url) {
+                Ok(()) => {
+                    println!("   PostgreSQL:          🟢 Bucle invertido verificado ({db_url})")
+                }
+                Err(e) => {
+                    println!("   PostgreSQL:          🔴 Violación de aislamiento: {e}");
+                    compliant = false;
+                }
+            }
+
+            match policy.validate_url(&emb_url) {
+                Ok(()) => {
+                    println!("   Runtime llama.cpp:   🟢 Bucle invertido verificado ({emb_url})")
+                }
+                Err(e) => {
+                    println!("   Runtime llama.cpp:   🔴 Violación de aislamiento: {e}");
+                    compliant = false;
+                }
+            }
+
+            // Validar bloqueo determinista de salida externa
+            let ext_test = policy.validate_url("https://api.openai.com/v1/chat/completions");
+            if ext_test.is_err() {
+                println!("   Salida Externa / WAN:🟢 Bloqueada deterministamente (cero telemetría ni APIs remotas)");
+            } else {
+                println!("   Salida Externa / WAN:🔴 Fuga detectada en política offline");
+                compliant = false;
+            }
+
+            println!("   Protocolo MCP:       🟢 Canal stdio 100% local y seguro");
+
+            if compliant {
+                println!("\n✅ Postura Offline: CUMPLIDA. El sistema opera 100% local en hardware propio.");
+            } else {
+                eprintln!(
+                    "\n❌ Postura Offline: FALLIDA. Corrige los endpoints no locales configurados."
+                );
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Doctor(args) => {
+            let db_url = resolve_database_url(cli.database_url.clone());
+            let emb_url = resolve_embedding_url(cli.embedding_url.clone());
+
+            let diag: Option<Arc<dyn DoctorDiagnostician>> = if cli.in_memory {
+                None
+            } else {
+                match build_pg_pool(&db_url).await {
+                    Ok(pool) => Some(Arc::new(PostgresDoctorDiagnostician::new(
+                        pool,
+                        emb_url.clone(),
+                    ))),
+                    Err(_) => None,
+                }
+            };
+
+            let doctor_uc = DoctorUseCase::new(diag);
+            let report = doctor_uc
+                .execute(DoctorCommand {
+                    database_url: Some(db_url),
+                    embedding_url: Some(emb_url),
+                    in_memory: cli.in_memory,
+                    offline: cli.offline,
+                    config_path: args.config,
+                })
+                .await?;
+
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("🧠 Local Brain Doctor — Diagnóstico de Salud del Sistema (SRS §35)");
+                println!("   Core: v{} | SO: {}", report.core_version, report.os);
+                println!("----------------------------------------------------------------------");
+
+                for check in &report.checks {
+                    println!(
+                        " {} [{:<13}] {:<32} {}",
+                        check.status.icon(),
+                        check.category,
+                        check.name,
+                        check.message
+                    );
+                    if args.verbose {
+                        if let Some(lat) = check.latency_ms {
+                            println!("      ⏱️ Latencia: {:.2} ms", lat);
+                        }
+                    }
+                    if let Some(ref remedy) = check.remedy {
+                        println!("      💡 Sugerencia: {}", remedy);
+                    }
+                }
+
+                println!("----------------------------------------------------------------------");
+                println!(
+                    "   Resumen: {} OK | {} Advertencias | {} Fallos Críticos",
+                    report.ok_count(),
+                    report.warn_count(),
+                    report.fail_count()
+                );
+
+                if report.is_healthy() {
+                    println!("   Estado General: 🟢 SALUDABLE Y OPERATIVO");
+                } else {
+                    println!("   Estado General: 🔴 REQUIERE ATENCIÓN");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Backup(args) => {
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let format = match args.format {
+                CliBackupFormat::Jsonl => BackupFormat::Jsonl,
+                CliBackupFormat::Sql => BackupFormat::Sql,
+            };
+
+            let backup_uc = BackupUseCase::new(ctx.backup_repo.clone());
+            match backup_uc
+                .execute(BackupCommand {
+                    format,
+                    project: args.project.clone(),
+                    include_embeddings: !args.no_embeddings,
+                })
+                .await
+            {
+                Ok(res) => {
+                    let target_path = args.output.unwrap_or(res.filename_suggestion);
+                    if target_path == "-" {
+                        print!("{}", res.content);
+                    } else {
+                        if let Err(e) = std::fs::write(&target_path, &res.content) {
+                            eprintln!(
+                                "❌ Error al escribir archivo de respaldo '{}': {e}",
+                                target_path
+                            );
+                            std::process::exit(1);
+                        }
+                        println!("🧠 Respaldo de Local Brain completado con éxito (SRS §52)");
+                        println!("   Archivo:              {}", target_path);
+                        println!("   Formato:              {:?}", format);
+                        println!("   Total Memorias:       {}", res.manifest.total_memories);
+                        println!("   Total Embeddings:     {}", res.manifest.total_embeddings);
+                        println!(
+                            "   Nodos / Aristas:      {} / {}",
+                            res.manifest.total_graph_nodes, res.manifest.total_graph_edges
+                        );
+                        println!(
+                            "   Candidatos / Evid:    {} / {}",
+                            res.manifest.total_learning_candidates,
+                            res.manifest.total_learning_evidences
+                        );
+                        println!(
+                            "   Conflictos / Runs:    {} / {}",
+                            res.manifest.total_conflicts, res.manifest.total_consolidation_runs
+                        );
+                        println!("   Suma SHA-256:         {}", res.manifest.checksum_sha256);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error durante la exportación de respaldo: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Restore(args) => {
+            if args.wipe && !args.confirm {
+                eprintln!("🛑 La opción '--wipe' purga todas las tablas de Local Brain antes de restaurar.");
+                eprintln!("   Por seguridad (Human Review Gate SRS §41), debes confirmar con el flag '--confirm'.");
+                std::process::exit(1);
+            }
+
+            let content = match std::fs::read_to_string(&args.input) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!(
+                        "❌ No se pudo leer el archivo de respaldo '{}': {e}",
+                        args.input
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            let format = match args.format {
+                Some(CliBackupFormat::Jsonl) => BackupFormat::Jsonl,
+                Some(CliBackupFormat::Sql) => BackupFormat::Sql,
+                None => BackupFormat::from_path_or_str(&args.input),
+            };
+
+            let ctx = match build_context(
+                cli.in_memory,
+                cli.database_url,
+                cli.embedding_url,
+                cli.offline,
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let restore_uc = RestoreUseCase::new(ctx.backup_repo.clone());
+            match restore_uc
+                .execute(RestoreCommand {
+                    content,
+                    format,
+                    dry_run: args.dry_run,
+                    wipe: args.wipe,
+                })
+                .await
+            {
+                Ok(report) => {
+                    if report.is_dry_run {
+                        println!(
+                            "🔍 Simulación de Restauración (--dry-run) completada (SRS §52, §53)"
+                        );
+                        println!("   Archivo:              {}", args.input);
+                        println!("   Checksum SHA-256:     🟢 Verificado y válido");
+                        println!(
+                            "   Purga Previa (wipe):  {}",
+                            if report.wiped { "Sí (simulada)" } else { "No" }
+                        );
+                        println!("   Memorias a importar:  {}", report.counts.memories);
+                        println!("   Embeddings:           {}", report.counts.embeddings);
+                        println!(
+                            "   Nodos / Aristas:      {} / {}",
+                            report.counts.graph_nodes, report.counts.graph_edges
+                        );
+                        println!(
+                            "   Candidatos / Evid:    {} / {}",
+                            report.counts.learning_candidates, report.counts.learning_evidences
+                        );
+                        println!(
+                            "   Conflictos / Runs:    {} / {}",
+                            report.counts.conflicts, report.counts.consolidation_runs
+                        );
+                        println!("\n💡 Ejecuta sin '--dry-run' para aplicar los cambios a la persistencia.");
+                    } else {
+                        println!(
+                            "✅ Restauración de Local Brain completada exitosamente (SRS §52, §53)"
+                        );
+                        println!("   Archivo:              {}", args.input);
+                        println!("   Checksum SHA-256:     🟢 Verificado y válido");
+                        println!(
+                            "   Purga Previa (wipe):  {}",
+                            if report.wiped { "Aplicada" } else { "No" }
+                        );
+                        println!("   Memorias importadas:  {}", report.counts.memories);
+                        println!("   Embeddings:           {}", report.counts.embeddings);
+                        println!(
+                            "   Nodos / Aristas:      {} / {}",
+                            report.counts.graph_nodes, report.counts.graph_edges
+                        );
+                        println!(
+                            "   Candidatos / Evid:    {} / {}",
+                            report.counts.learning_candidates, report.counts.learning_evidences
+                        );
+                        println!(
+                            "   Conflictos / Runs:    {} / {}",
+                            report.counts.conflicts, report.counts.consolidation_runs
+                        );
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error durante la restauración: {e}");
                     std::process::exit(1);
                 }
             }

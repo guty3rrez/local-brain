@@ -48,7 +48,7 @@ Monitorea el avance de las fases definidas en la especificación formal ([`SRS �
 | **Fase 6** | **Learning & Candidate Knowledge** | 🟢 *Completado* | `[██████████] 100%` | Observación vs Creencia, confidence scoring, `brain_learn` / `brain_explain` MCP & CLI |
 | **Fase 7** | **Consolidación & Reflexión** | 🟢 *Completado* | `[██████████] 100%` | `brain reflect`, clustering, contradicciones (`CONFLICT`), MCP y CLI |
 | **Fase 8** | **Advanced Hybrid Retrieval** | 🟢 *Completado* | `[██████████] 100%` | Pipeline híbrido FTS+Vector+Grafo, RRF, scoring multidimensional, olvido temporal |
-| **Fase 9** | **Hardening & Producción** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Modo offline, benchmarks p95 < 500ms, backup |
+| **Fase 9** | **Hardening & Producción** | 🟢 *Completado* | `[██████████] 100%` | Modo offline estricto, benchmarks hardware Ryzen 7 + RTX 3050, backup/restore JSONL/SQL, brain doctor |
 
 *Consulta el desglose completo de historias de usuario y criterios de aceptación en [BACKLOG.md](file:///home/guty_3rrez/Proyectos/local-brain/BACKLOG.md).*
 

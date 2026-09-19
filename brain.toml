@@ -41,3 +41,10 @@ min_score = 0.05
 graph_max_depth = 1
 # Cantidad máxima de nodos a expandir desde el grafo
 graph_expansion_limit = 5
+
+[offline]
+# Modo offline estricto: bloquea llamadas salientes a nubes o redes externas (SRS §29, §51)
+enabled = true
+# Permite conexiones a interfaces de bucle invertido local (localhost, 127.0.0.1, ::1)
+allow_localhost = true
+

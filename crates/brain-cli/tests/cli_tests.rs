@@ -666,3 +666,158 @@ fn cli_conflicts_command() {
         .success()
         .stdout(predicate::str::contains("Contradicciones Pendientes"));
 }
+
+#[test]
+fn cli_offline_status_command() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("offline")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Modo Offline Estricto"))
+        .stdout(predicate::str::contains("Auditoría de Aislamiento de Red"))
+        .stdout(predicate::str::contains("Bucle invertido verificado"))
+        .stdout(predicate::str::contains("Postura Offline: CUMPLIDA"));
+}
+
+#[test]
+fn cli_offline_mode_blocks_external_url() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("--offline")
+        .arg("--database-url")
+        .arg("postgres://user:pass@db.external.com:5432/brain")
+        .arg("status")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn cli_doctor_command_healthy() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Local Brain Doctor"))
+        .stdout(predicate::str::contains("Versión de Local Brain"))
+        .stdout(predicate::str::contains("Conectividad PostgreSQL"))
+        .stdout(predicate::str::contains("Esquema de Tablas"))
+        .stdout(predicate::str::contains("Extensión pgvector"));
+}
+
+#[test]
+fn cli_doctor_command_in_memory() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("--in-memory")
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Local Brain Doctor"))
+        .stdout(predicate::str::contains("Almacenamiento en Memoria"))
+        .stdout(predicate::str::contains("SALUDABLE Y OPERATIVO"));
+}
+
+#[test]
+fn cli_doctor_command_json() {
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("doctor")
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"core_version\":"))
+        .stdout(predicate::str::contains("\"checks\":"))
+        .stdout(predicate::str::contains("\"category\": \"Persistencia\""));
+}
+
+#[test]
+fn cli_backup_and_restore_roundtrip() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let project = format!("backup-test-{tag}");
+    let content = format!("Recuerdo de prueba para backup y restore [{tag}]");
+    let backup_file = format!("/tmp/test_backup_{tag}.jsonl");
+
+    // 1. Crear memoria
+    let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rem_cmd
+        .arg("remember")
+        .arg(&content)
+        .arg("--project")
+        .arg(&project)
+        .assert()
+        .success();
+
+    // 2. Exportar backup
+    let mut bak_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    bak_cmd
+        .arg("backup")
+        .arg("-o")
+        .arg(&backup_file)
+        .arg("--project")
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Respaldo de Local Brain completado con éxito",
+        ))
+        .stdout(predicate::str::contains("Total Memorias:       1"));
+
+    // 3. Simulación de Restore (--dry-run)
+    let mut dry_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    dry_cmd
+        .arg("restore")
+        .arg("-i")
+        .arg(&backup_file)
+        .arg("--dry-run")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Simulación de Restauración (--dry-run)",
+        ))
+        .stdout(predicate::str::contains(
+            "Checksum SHA-256:     🟢 Verificado y válido",
+        ))
+        .stdout(predicate::str::contains("Memorias a importar:  1"));
+
+    // 4. Restauración real
+    let mut res_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    res_cmd
+        .arg("restore")
+        .arg("-i")
+        .arg(&backup_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Restauración de Local Brain completada exitosamente",
+        ))
+        .stdout(predicate::str::contains("Memorias importadas:  1"));
+
+    // 5. Verificar que se pueda recuperar con recall
+    let mut rec_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rec_cmd
+        .arg("recall")
+        .arg("--project")
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&content));
+
+    // Limpieza
+    let _ = std::fs::remove_file(&backup_file);
+}
+
+#[test]
+fn cli_restore_wipe_requires_confirm() {
+    let dummy_file = "/tmp/dummy_restore.jsonl";
+    let _ = std::fs::write(dummy_file, "{}");
+
+    let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    cmd.arg("restore")
+        .arg("-i")
+        .arg(dummy_file)
+        .arg("--wipe")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "debes confirmar con el flag '--confirm'",
+        ));
+
+    let _ = std::fs::remove_file(dummy_file);
+}

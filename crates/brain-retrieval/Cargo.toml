@@ -22,3 +22,8 @@ toml = { workspace = true }
 [dev-dependencies]
 rstest = { workspace = true }
 tokio = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "hardware_reference"
+harness = false

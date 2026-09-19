@@ -291,18 +291,18 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 9 — Hardening, Benchmarking & Producción (SRS §29, §30, §35, §49, §50, §68)
 *Objetivo: Robustez, auditoría de seguridad ISO 27000 / 25010, modo offline y empaquetado.*
 
-- [ ] **[F9-01] Modo Offline Estricto (`brain offline`)** `P0`
+- [x] **[F9-01] Modo Offline Estricto (`brain offline`)** `P0`
   - **Descripción**: Flag de configuración que bloquea cualquier llamada de red saliente y asegura funcionamiento 100% local.
-  - **Arsenal**: *Integration*: Test con mock de red desconectado.
-- [ ] **[F9-02] Suite de Benchmarking de Hardware de Referencia (SRS §50)** `P1`
+  - **Arsenal**: *Integration*: Test con mock de red desconectado y validación de bucle invertido estricto.
+- [x] **[F9-02] Suite de Benchmarking de Hardware de Referencia (SRS §50)** `P1`
   - **Descripción**: Pruebas de rendimiento automatizadas con `criterion` ejecutables en Ryzen 7 + RTX 3050 (4 GB VRAM).
-  - **Arsenal**: Reportes reproducibles de latencia, throughput y consumo de VRAM.
-- [ ] **[F9-03] Sistema de Respaldo y Restauración (`brain backup` / `brain restore`)** `P1`
-  - **Descripción**: Exportación e importación segura de memorias, grafo, configuración e historial en formatos JSONL / SQL.
-  - **Arsenal**: *Integration*: Ciclo completo backup -> wipe -> restore -> verify integrity.
-- [ ] **[F9-04] Observabilidad y Diagnóstico (`brain doctor`)** `P1`
-  - **Descripción**: Verificación automática de PostgreSQL, pgvector, llama.cpp, variables de entorno y estado de jobs.
-  - **Arsenal**: *CLI Integration*: Simulación de componentes caídos y verificación de reportes de error.
+  - **Arsenal**: Reportes reproducibles de latencia, throughput y consumo de VRAM en `docs/BENCHMARKS.md`.
+- [x] **[F9-03] Sistema de Respaldo y Restauración (`brain backup` / `brain restore`)** `P1`
+  - **Descripción**: Exportación e importación segura de memorias, grafo, configuración e historial en formatos JSONL / SQL con verificación de integridad SHA-256 y control de borrado (`--wipe` + `--confirm`).
+  - **Arsenal**: *Integration*: Ciclo completo backup -> wipe -> restore -> verify integrity con 32 tests de integración.
+- [x] **[F9-04] Observabilidad y Diagnóstico (`brain doctor`)** `P1`
+  - **Descripción**: Verificación automática de PostgreSQL, pgvector, llama.cpp, variables de entorno y estado de jobs con salida amigable y `--json`.
+  - **Arsenal**: *CLI Integration*: Simulación de componentes caídos y verificación de reportes de error y salud.
 
 ---
 

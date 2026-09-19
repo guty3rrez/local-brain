@@ -12,7 +12,13 @@ use uuid::Uuid;
 /// Límite máximo para el contenido textual de una memoria (64 KB).
 pub const MAX_MEMORY_CONTENT_BYTES: usize = 64 * 1024;
 
+pub mod backup;
+pub mod doctor;
+pub mod offline;
 pub mod specialized;
+pub use backup::*;
+pub use doctor::*;
+pub use offline::*;
 pub use specialized::*;
 
 /// Errores de invariantes y lógica del dominio puro.
@@ -67,6 +73,12 @@ pub enum DomainError {
 
     #[error("Asociación inválida: {0}")]
     InvalidAssociation(String),
+
+    #[error("Violación de política offline: {0}")]
+    OfflineViolation(String),
+
+    #[error("Error de respaldo o restauración: {0}")]
+    BackupError(String),
 }
 
 /// Identificador único fuertemente tipado de una memoria (SRS §9.1).

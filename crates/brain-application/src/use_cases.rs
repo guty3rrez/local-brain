@@ -36,6 +36,12 @@ pub enum ApplicationError {
 
     #[error("Parámetros de consulta inválidos: {0}")]
     InvalidQuery(String),
+
+    #[error("Error de validación: {0}")]
+    Validation(String),
+
+    #[error("Error interno de aplicación: {0}")]
+    Internal(String),
 }
 
 /// Comando para almacenar un nuevo recuerdo en el cerebro.
