@@ -5,8 +5,8 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 use tracing::{debug, info};
 
 use brain_application::{
-    ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, LearnUseCase, RecallUseCase,
-    RelateUseCase, RememberUseCase, TraverseGraphUseCase,
+    ConsolidateUseCase, ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, LearnUseCase,
+    RecallUseCase, ReflectUseCase, RelateUseCase, RememberUseCase, TraverseGraphUseCase,
 };
 use brain_core::CORE_VERSION;
 
@@ -16,8 +16,9 @@ use crate::protocol::{
 };
 use crate::security::McpSecurityPolicy;
 use crate::tools::{
-    execute_explain, execute_forget, execute_graph, execute_learn, execute_recall, execute_relate,
-    execute_remember, execute_search, execute_session_end, list_tools,
+    execute_consolidate, execute_explain, execute_forget, execute_graph, execute_learn,
+    execute_recall, execute_relate, execute_remember, execute_search, execute_session_end,
+    list_tools,
 };
 
 /// Servidor MCP de Local Brain.
@@ -31,6 +32,8 @@ pub struct McpServer {
     traverse_uc: Option<Arc<TraverseGraphUseCase>>,
     learn_uc: Option<Arc<LearnUseCase>>,
     explain_uc: Option<Arc<ExplainUseCase>>,
+    reflect_uc: Option<Arc<ReflectUseCase>>,
+    consolidate_uc: Option<Arc<ConsolidateUseCase>>,
     security: McpSecurityPolicy,
 }
 
@@ -51,6 +54,8 @@ impl McpServer {
             traverse_uc: None,
             learn_uc: None,
             explain_uc: None,
+            reflect_uc: None,
+            consolidate_uc: None,
             security,
         }
     }
@@ -80,6 +85,17 @@ impl McpServer {
     ) -> Self {
         self.learn_uc = Some(learn_uc);
         self.explain_uc = Some(explain_uc);
+        self
+    }
+
+    /// Adjunta los casos de uso para consolidación, reflexión y resolución de conflictos (SRS §16, §17, §18, F7-03).
+    pub fn with_consolidation(
+        mut self,
+        reflect_uc: Arc<ReflectUseCase>,
+        consolidate_uc: Arc<ConsolidateUseCase>,
+    ) -> Self {
+        self.reflect_uc = Some(reflect_uc);
+        self.consolidate_uc = Some(consolidate_uc);
         self
     }
 
@@ -177,6 +193,15 @@ impl McpServer {
                     }
                     "brain_explain" => {
                         execute_explain(arguments, self.explain_uc.clone(), &self.security).await
+                    }
+                    "brain_consolidate" => {
+                        execute_consolidate(
+                            arguments,
+                            self.reflect_uc.clone(),
+                            self.consolidate_uc.clone(),
+                            &self.security,
+                        )
+                        .await
                     }
                     _ => {
                         return Some(JsonRpcResponse::error(

@@ -4,9 +4,10 @@ use cucumber::{given, then, when, World};
 use std::sync::Arc;
 
 use brain_application::{
-    ExplainUseCase, ForgetUseCase, LearnUseCase, RecallUseCase, RelateUseCase, RememberUseCase,
-    TraverseGraphUseCase,
+    ConsolidateUseCase, ExplainUseCase, ForgetUseCase, LearnUseCase, RecallUseCase, ReflectUseCase,
+    RelateUseCase, RememberUseCase, TraverseGraphUseCase,
 };
+use brain_consolidation::in_memory::{InMemoryConflictRepository, MockConsolidationLlm};
 use brain_domain::ports::InMemoryMemoryRepository;
 use brain_graph::InMemoryGraphRepository;
 use brain_learning::InMemoryLearningRepository;
@@ -45,7 +46,18 @@ async fn given_mcp_server(world: &mut McpWorld) {
 
     let learning_repo = Arc::new(InMemoryLearningRepository::new());
     let learn_uc = Arc::new(LearnUseCase::new(learning_repo.clone()));
-    let explain_uc = Arc::new(ExplainUseCase::new(learning_repo));
+    let explain_uc = Arc::new(ExplainUseCase::new(learning_repo.clone()));
+
+    let conflict_repo = Arc::new(InMemoryConflictRepository::new());
+    let mock_llm = Arc::new(MockConsolidationLlm::new());
+    let reflect_uc = Arc::new(
+        ReflectUseCase::new(repo.clone(), conflict_repo.clone(), mock_llm.clone())
+            .with_learning_repository(Some(learning_repo.clone())),
+    );
+    let consolidate_uc = Arc::new(
+        ConsolidateUseCase::new(repo.clone(), conflict_repo, mock_llm)
+            .with_learning_repository(Some(learning_repo)),
+    );
 
     let server = McpServer::new(
         remember_uc,
@@ -54,7 +66,8 @@ async fn given_mcp_server(world: &mut McpWorld) {
         McpSecurityPolicy::new_full(),
     )
     .with_graph(relate_uc, traverse_uc)
-    .with_learning(learn_uc, explain_uc);
+    .with_learning(learn_uc, explain_uc)
+    .with_consolidation(reflect_uc, consolidate_uc);
     world.server = Some(server);
 }
 
@@ -363,6 +376,39 @@ async fn then_explain_response_protected(world: &mut McpWorld, conclusion: Strin
     assert!(text.contains(&conclusion));
     assert!(text.contains("<untrusted_explanation_context"));
     assert!(text.contains("</untrusted_explanation_context>"));
+}
+
+#[when(expr = "el agente ejecuta la herramienta {string} para el proyecto {string}")]
+async fn when_agent_calls_consolidate_for_project(
+    world: &mut McpWorld,
+    tool_name: String,
+    project: String,
+) {
+    let server = world.server.as_ref().expect("Servidor MCP no inicializado");
+    let req = JsonRpcRequest::new("tools/call", Some(serde_json::json!(14))).with_params(
+        serde_json::json!({
+            "name": tool_name,
+            "arguments": {
+                "project": project
+            }
+        }),
+    );
+    world.last_response = server.handle_request(req).await;
+}
+
+#[then(expr = "la respuesta confirma la consolidación con reporte protegido por delimitador")]
+async fn then_consolidation_confirmed_and_protected(world: &mut McpWorld) {
+    let resp = world.last_response.as_ref().expect("Sin respuesta previa");
+    let result = resp.result.as_ref().expect("Resultado esperado");
+    let is_error = result
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    assert!(!is_error, "Se esperaba resultado exitoso");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("<untrusted_consolidation_context"));
+    assert!(text.contains("</untrusted_consolidation_context>"));
+    assert!(text.contains("Reflexión completada"));
 }
 
 #[tokio::main]

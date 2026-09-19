@@ -19,7 +19,9 @@ fn cli_help_and_version() {
         .stdout(predicate::str::contains("relate"))
         .stdout(predicate::str::contains("graph"))
         .stdout(predicate::str::contains("learn"))
-        .stdout(predicate::str::contains("explain"));
+        .stdout(predicate::str::contains("explain"))
+        .stdout(predicate::str::contains("reflect"))
+        .stdout(predicate::str::contains("conflicts"));
 
     let mut ver_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
     ver_cmd
@@ -617,4 +619,50 @@ fn cli_learn_contradiction_flow() {
         .success()
         .stdout(predicate::str::contains(&statement))
         .stdout(predicate::str::contains("[-] REFUTA"));
+}
+
+#[test]
+fn cli_reflect_command() {
+    let tag = uuid::Uuid::new_v4().to_string();
+    let project = format!("reflect-suite-{tag}");
+
+    // Insertar 2 recuerdos para que el cluster se forme
+    for i in 1..=2 {
+        let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+        rem_cmd
+            .arg("remember")
+            .arg(format!(
+                "Observación sobre optimización de queries SQL número {i} [{tag}]"
+            ))
+            .arg("--project")
+            .arg(&project)
+            .assert()
+            .success();
+    }
+
+    let mut ref_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    ref_cmd
+        .arg("reflect")
+        .arg("--project")
+        .arg(&project)
+        .arg("--limit")
+        .arg("10")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Sesión de Reflexión y Consolidación",
+        ))
+        .stdout(predicate::str::contains("Memorias analizadas:  2"))
+        .stdout(predicate::str::contains("Clusters formados:    1"));
+}
+
+#[test]
+fn cli_conflicts_command() {
+    let mut list_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    list_cmd
+        .arg("conflicts")
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Contradicciones Pendientes"));
 }

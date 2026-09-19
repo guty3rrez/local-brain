@@ -8,9 +8,10 @@ use serde_json::json;
 use tracing::{error, info, warn};
 
 use brain_application::{
-    ApplicationError, ExpireSessionUseCase, ExplainQuery, ExplainUseCase, ForgetUseCase,
-    LearnCommand, LearnUseCase, RecallQuery, RecallUseCase, RelateCommand, RelateUseCase,
-    RememberCommand, RememberUseCase, TraverseGraphQuery, TraverseGraphUseCase,
+    ApplicationError, ConsolidateCommand, ConsolidateUseCase, ExpireSessionUseCase, ExplainQuery,
+    ExplainUseCase, ForgetUseCase, LearnCommand, LearnUseCase, RecallQuery, RecallUseCase,
+    ReflectCommand, ReflectUseCase, RelateCommand, RelateUseCase, RememberCommand, RememberUseCase,
+    TraverseGraphQuery, TraverseGraphUseCase,
 };
 use brain_domain::model::{MemoryId, MemoryType, ProcedureStep};
 use brain_graph::model::{RelationType, TraversalDirection};
@@ -18,8 +19,8 @@ use brain_learning::model::EvidenceSourceType;
 
 use crate::protocol::{ToolCallResult, ToolDefinition};
 use crate::security::{
-    format_retrieved_memories, wrap_untrusted_explanation, McpPermission, McpSecurityError,
-    McpSecurityPolicy,
+    format_retrieved_memories, wrap_untrusted_consolidation, wrap_untrusted_explanation,
+    McpPermission, McpSecurityError, McpSecurityPolicy,
 };
 
 /// Retorna la lista de definiciones de herramientas estándar expuestas por Local Brain (SRS §21, §10).
@@ -382,6 +383,34 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["query"]
+            }),
+        },
+        ToolDefinition {
+            name: "brain_consolidate".to_string(),
+            description: "Ejecuta consolidación y reflexión sobre clusters de experiencias recientes o memorias específicas, sintetizando nuevo conocimiento candidato y detectando contradicciones (SRS §16, §17, §18).".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Filtro opcional por proyecto para consolidar sus experiencias."
+                    },
+                    "memory_ids": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Lista explícita opcional de UUIDs de memorias para consolidar directamente."
+                    },
+                    "similarity_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Umbral de similitud coseno para clustering (por defecto: 0.82)."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Si es true, simula la consolidación sin persistir cambios."
+                    }
+                }
             }),
         },
     ]
@@ -1163,6 +1192,102 @@ pub async fn execute_explain(
     }
 }
 
+/// Ejecuta la herramienta `brain_consolidate` (SRS §16, §17, §18, Fase 7).
+pub async fn execute_consolidate(
+    args: serde_json::Value,
+    reflect_uc: Option<Arc<ReflectUseCase>>,
+    consolidate_uc: Option<Arc<ConsolidateUseCase>>,
+    security: &McpSecurityPolicy,
+) -> ToolCallResult {
+    if let Err(e) = security.check_permission(McpPermission::Write) {
+        return ToolCallResult::error(format!("Error de seguridad: {e}"));
+    }
+
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let dry_run = args
+        .get("dry_run")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let threshold = args
+        .get("similarity_threshold")
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32)
+        .unwrap_or(0.82);
+
+    let memory_ids_opt: Option<Vec<MemoryId>> = args
+        .get("memory_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|val| val.as_str())
+                .filter_map(|s| MemoryId::from_str(s).ok())
+                .collect()
+        });
+
+    if let Some(mem_ids) = memory_ids_opt {
+        if !mem_ids.is_empty() {
+            let Some(uc) = consolidate_uc else {
+                return ToolCallResult::error(
+                    "El caso de uso ConsolidateUseCase no está configurado en este servidor MCP.",
+                );
+            };
+
+            let cmd = ConsolidateCommand {
+                memory_ids: mem_ids,
+                project,
+                dry_run,
+            };
+
+            return match uc.execute(cmd).await {
+                Ok(report) => {
+                    let sanitized = wrap_untrusted_consolidation(
+                        &report.summary,
+                        report.hypotheses.len(),
+                        report.conflicts_detected.len(),
+                    );
+                    ToolCallResult::success(sanitized)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Fallo al ejecutar ConsolidateUseCase vía MCP");
+                    ToolCallResult::error(format!("Error en consolidación: {e}"))
+                }
+            };
+        }
+    }
+
+    let Some(uc) = reflect_uc else {
+        return ToolCallResult::error(
+            "El caso de uso ReflectUseCase no está configurado en este servidor MCP.",
+        );
+    };
+
+    let mut cmd = ReflectCommand::new()
+        .with_threshold(threshold)
+        .with_dry_run(dry_run);
+
+    if let Some(proj) = project {
+        cmd = cmd.with_project(proj);
+    }
+
+    match uc.execute(cmd).await {
+        Ok(report) => {
+            let sanitized = wrap_untrusted_consolidation(
+                &report.summary,
+                report.hypotheses.len(),
+                report.conflicts_detected.len(),
+            );
+            ToolCallResult::success(sanitized)
+        }
+        Err(e) => {
+            warn!(error = %e, "Fallo al ejecutar ReflectUseCase vía MCP");
+            ToolCallResult::error(format!("Error en reflexión: {e}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1397,6 +1522,69 @@ mod tests {
         let ro_res = execute_learn(
             json!({"statement": "Prueba de solo lectura"}),
             Some(learn_uc),
+            &ro_policy,
+        )
+        .await;
+        assert!(ro_res.is_error);
+        assert!(ro_res.content[0].text.contains("Permiso denegado"));
+    }
+
+    #[tokio::test]
+    async fn test_consolidate_tool_flow() {
+        use brain_consolidation::in_memory::{InMemoryConflictRepository, MockConsolidationLlm};
+        use brain_domain::model::{Memory, MemoryContent, MemoryOrigin, Provenance};
+        use brain_domain::ports::{InMemoryMemoryRepository, MemoryRepository};
+
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+        let conflict_repo = Arc::new(InMemoryConflictRepository::new());
+        let llm = Arc::new(MockConsolidationLlm::new());
+
+        let prov = Provenance::new(MemoryOrigin::Observation);
+        let m1 = Memory::new_episodic(
+            MemoryContent::new("El despliegue con Docker tardó 10 minutos").unwrap(),
+            prov.clone(),
+            Some("devops".to_string()),
+        );
+        let m2 = Memory::new_episodic(
+            MemoryContent::new("El despliegue con Docker volvió a demorar por capas").unwrap(),
+            prov,
+            Some("devops".to_string()),
+        );
+        mem_repo.save(&m1).await.unwrap();
+        mem_repo.save(&m2).await.unwrap();
+
+        let reflect_uc = Arc::new(ReflectUseCase::new(
+            mem_repo.clone(),
+            conflict_repo.clone(),
+            llm.clone(),
+        ));
+        let consolidate_uc = Arc::new(ConsolidateUseCase::new(mem_repo, conflict_repo, llm));
+        let policy = McpSecurityPolicy::new_full();
+
+        // 1. Ejecutar consolidación por proyecto
+        let args = json!({
+            "project": "devops",
+            "similarity_threshold": 0.82
+        });
+        let res = execute_consolidate(
+            args,
+            Some(reflect_uc.clone()),
+            Some(consolidate_uc.clone()),
+            &policy,
+        )
+        .await;
+        assert!(!res.is_error);
+        assert!(res.content[0]
+            .text
+            .contains("<untrusted_consolidation_context"));
+        assert!(res.content[0].text.contains("Reflexión completada"));
+
+        // 2. Política de solo lectura deniega consolidación
+        let ro_policy = McpSecurityPolicy::new_read_only();
+        let ro_res = execute_consolidate(
+            json!({"project": "devops"}),
+            Some(reflect_uc),
+            Some(consolidate_uc),
             &ro_policy,
         )
         .await;

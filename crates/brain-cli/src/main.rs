@@ -3,6 +3,7 @@
 //! Interfaz de línea de comandos para gestión, inicialización, consulta y búsqueda semántica
 //! de memoria cognitiva local (SRS §22, §25, §36).
 
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,10 +11,15 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use sqlx::Row;
 
 use brain_application::{
-    EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery, ExplainUseCase, ForgetUseCase,
-    LearnCommand, LearnUseCase, PurgeExpiredUseCase, RecallQuery, RecallUseCase, RelateCommand,
-    RelateUseCase, RememberCommand, RememberUseCase, TraverseGraphQuery, TraverseGraphUseCase,
+    ConsolidateUseCase, EmbedPendingUseCase, ExpireSessionUseCase, ExplainQuery, ExplainUseCase,
+    ForgetUseCase, LearnCommand, LearnUseCase, ListConflictsQuery, ListConflictsUseCase,
+    PurgeExpiredUseCase, RecallQuery, RecallUseCase, ReflectCommand, ReflectUseCase, RelateCommand,
+    RelateUseCase, RememberCommand, RememberUseCase, ResolveConflictCommand,
+    ResolveConflictUseCase, TraverseGraphQuery, TraverseGraphUseCase,
 };
+use brain_consolidation::in_memory::{InMemoryConflictRepository, MockConsolidationLlm};
+use brain_consolidation::model::ConflictId;
+use brain_consolidation::ports::{ConflictRepository, ConsolidationLlmPort};
 use brain_core::CORE_VERSION;
 use brain_domain::model::{DomainError, MemoryId, MemoryStatus, MemoryType};
 use brain_domain::ports::{
@@ -23,7 +29,8 @@ use brain_domain::ports::{
 use brain_graph::{GraphRepository, InMemoryGraphRepository, RelationType, TraversalDirection};
 use brain_infrastructure::embeddings::{LlamaCppConfig, LlamaCppEmbeddingProvider};
 use brain_infrastructure::{
-    PostgresGraphRepository, PostgresLearningRepository, PostgresMemoryRepository,
+    LlamaCppReflectionClient, PostgresConflictRepository, PostgresGraphRepository,
+    PostgresLearningRepository, PostgresMemoryRepository,
 };
 use brain_learning::{EvidenceSourceType, InMemoryLearningRepository, LearningRepository};
 use brain_mcp::{McpSecurityPolicy, McpServer};
@@ -89,6 +96,12 @@ enum Commands {
 
     /// Explica el fundamento empírico, evidencias y nivel de confianza de un conocimiento o creencia (SRS §57, Fase 6)
     Explain(ExplainArgs),
+
+    /// Ejecuta el proceso de reflexión asíncrona sobre experiencias recientes (SRS §16, §17, §18, Fase 7)
+    Reflect(ReflectArgs),
+
+    /// Gestiona y resuelve contradicciones cognitivas y conflictos de conocimiento (SRS §18, Fase 7)
+    Conflicts(ConflictsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -255,6 +268,64 @@ struct ExplainArgs {
     /// Muestra la salida en formato JSON estructurado
     #[arg(long, default_value_t = false)]
     json: bool,
+}
+
+#[derive(Args, Debug)]
+struct ReflectArgs {
+    /// Proyecto o dominio de conocimiento a reflexionar
+    #[arg(short, long)]
+    project: Option<String>,
+
+    /// Límite máximo de recuerdos episódicos a analizar
+    #[arg(short = 'n', long, default_value_t = 50)]
+    limit: usize,
+
+    /// Umbral mínimo de similitud coseno para clustering (0.0 a 1.0)
+    #[arg(short = 't', long = "threshold", default_value_t = 0.82)]
+    threshold: f32,
+
+    /// Simula la reflexión sin persistir hipótesis ni estados de conflicto
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+
+    /// Muestra el resultado de la reflexión en formato JSON
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct ConflictsArgs {
+    #[command(subcommand)]
+    command: ConflictCommands,
+}
+
+#[derive(Subcommand, Debug)]
+enum ConflictCommands {
+    /// Lista contradicciones pendientes de resolución
+    List(ConflictListArgs),
+    /// Resuelve una contradicción aportando contexto aclaratorio
+    Resolve(ConflictResolveArgs),
+}
+
+#[derive(Args, Debug)]
+struct ConflictListArgs {
+    /// Filtrar por proyecto específico
+    #[arg(short, long)]
+    project: Option<String>,
+
+    /// Salida en formato JSON
+    #[arg(long, default_value_t = false)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct ConflictResolveArgs {
+    /// Identificador UUID del conflicto a resolver
+    id: String,
+
+    /// Contexto aclaratorio o directriz que resuelve la contradicción (SRS §18)
+    #[arg(short, long)]
+    resolution: String,
 }
 
 #[derive(Args, Debug)]
@@ -435,6 +506,8 @@ struct AppContext {
     embedding_provider: Arc<dyn EmbeddingProvider>,
     graph_repo: Arc<dyn GraphRepository>,
     learning_repo: Arc<dyn LearningRepository>,
+    conflict_repo: Arc<dyn ConflictRepository>,
+    llm_reflection_client: Arc<dyn ConsolidationLlmPort>,
 }
 
 async fn build_context(
@@ -449,20 +522,28 @@ async fn build_context(
             embedding_provider: Arc::new(InMemoryEmbeddingProvider::new()),
             graph_repo: Arc::new(InMemoryGraphRepository::new()),
             learning_repo: Arc::new(InMemoryLearningRepository::new()),
+            conflict_repo: Arc::new(InMemoryConflictRepository::new()),
+            llm_reflection_client: Arc::new(MockConsolidationLlm::new()),
         })
     } else {
         let db_url = resolve_database_url(db_url_override);
         let pool = build_pg_pool(&db_url).await?;
         let pg_repo = Arc::new(PostgresMemoryRepository::new(pool.clone()));
         let graph_repo = Arc::new(PostgresGraphRepository::new(pool.clone()));
-        let learning_repo = Arc::new(PostgresLearningRepository::new(pool));
+        let learning_repo = Arc::new(PostgresLearningRepository::new(pool.clone()));
+        let conflict_repo = Arc::new(PostgresConflictRepository::new(pool));
 
         let emb_url = resolve_embedding_url(emb_url_override);
         let emb_provider = Arc::new(
             LlamaCppEmbeddingProvider::new(
-                LlamaCppConfig::new(emb_url).with_dimension(DEFAULT_EMBEDDING_DIMENSION),
+                LlamaCppConfig::new(emb_url.clone()).with_dimension(DEFAULT_EMBEDDING_DIMENSION),
             )
             .map_err(|e| e.to_string())?,
+        );
+
+        let completion_url = emb_url.replace("/embedding", "/completion");
+        let llm_reflection_client = Arc::new(
+            LlamaCppReflectionClient::from_endpoint(completion_url).map_err(|e| e.to_string())?,
         );
 
         Ok(AppContext {
@@ -471,6 +552,8 @@ async fn build_context(
             embedding_provider: emb_provider,
             graph_repo,
             learning_repo,
+            conflict_repo,
+            llm_reflection_client,
         })
     }
 }
@@ -895,6 +978,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     "   Learning Engine:     Candidatos: {cands} | Evidencias: {evs} | Validados: {valids}"
                                 );
                             }
+
+                            // Estadísticas de Consolidación y Conflictos (SRS §16, §17, §18, Fase 7)
+                            let consolidation_stats = sqlx::query(
+                                r#"
+                                SELECT 
+                                    (SELECT COUNT(*) FROM consolidation_runs)::bigint AS runs_count,
+                                    (SELECT COUNT(*) FROM knowledge_conflicts WHERE status = 'pending')::bigint AS pending_conflicts_count,
+                                    (SELECT COUNT(*) FROM knowledge_conflicts WHERE status = 'resolved')::bigint AS resolved_conflicts_count
+                                "#,
+                            )
+                            .fetch_one(&pool)
+                            .await;
+
+                            if let Ok(c_row) = consolidation_stats {
+                                let runs: i64 = c_row.try_get("runs_count").unwrap_or(0);
+                                let pending: i64 =
+                                    c_row.try_get("pending_conflicts_count").unwrap_or(0);
+                                let resolved: i64 =
+                                    c_row.try_get("resolved_conflicts_count").unwrap_or(0);
+                                println!(
+                                    "   Consolidación:       Sesiones: {runs} | Conflictos Pendientes: {pending} | Resueltos: {resolved}"
+                                );
+                            }
                         }
                         Err(sqlx::Error::Database(db_err))
                             if db_err.code().as_deref() == Some("42P01") =>
@@ -968,6 +1074,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ExplainUseCase::new(ctx.learning_repo.clone())
                     .with_memory_repository(ctx.memory_repo.clone()),
             );
+            let reflect_uc = Arc::new(
+                ReflectUseCase::new(
+                    ctx.memory_repo.clone(),
+                    ctx.conflict_repo.clone(),
+                    ctx.llm_reflection_client.clone(),
+                )
+                .with_learning_repository(Some(ctx.learning_repo.clone()))
+                .with_graph_repository(Some(ctx.graph_repo.clone())),
+            );
+            let consolidate_uc = Arc::new(
+                ConsolidateUseCase::new(
+                    ctx.memory_repo.clone(),
+                    ctx.conflict_repo.clone(),
+                    ctx.llm_reflection_client.clone(),
+                )
+                .with_learning_repository(Some(ctx.learning_repo.clone())),
+            );
 
             let security = if args.read_only {
                 McpSecurityPolicy::new_read_only()
@@ -980,7 +1103,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let server = McpServer::new(remember_uc, recall_uc, forget_uc, security)
                 .with_expire_session_uc(expire_session_uc)
                 .with_graph(relate_uc, traverse_uc)
-                .with_learning(learn_uc, explain_uc);
+                .with_learning(learn_uc, explain_uc)
+                .with_consolidation(reflect_uc, consolidate_uc);
             if let Err(e) = server.run_stdio().await {
                 eprintln!("❌ Error en servidor MCP: {e}");
                 std::process::exit(1);
@@ -1254,6 +1378,199 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => {
                     eprintln!("❌ Error al generar explicación: {e}");
                     std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Reflect(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            let use_case = ReflectUseCase::new(
+                ctx.memory_repo,
+                ctx.conflict_repo,
+                ctx.llm_reflection_client,
+            )
+            .with_learning_repository(Some(ctx.learning_repo))
+            .with_graph_repository(Some(ctx.graph_repo));
+
+            let mut cmd = ReflectCommand::new()
+                .with_limit(args.limit)
+                .with_threshold(args.threshold)
+                .with_dry_run(args.dry_run);
+
+            if let Some(proj) = args.project {
+                cmd = cmd.with_project(proj);
+            }
+
+            match use_case.execute(cmd).await {
+                Ok(report) => {
+                    if args.json {
+                        match serde_json::to_string_pretty(&report) {
+                            Ok(json_str) => println!("{json_str}"),
+                            Err(e) => {
+                                eprintln!("❌ Error al serializar reporte a JSON: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!("🧠 Local Brain — Sesión de Reflexión y Consolidación (SRS §16, §17, §18)");
+                        println!(
+                            "───────────────────────────────────────────────────────────────────"
+                        );
+                        println!("   Run ID:               {}", report.run_id);
+                        println!("   Memorias analizadas:  {}", report.memories_analyzed);
+                        println!("   Clusters formados:    {}", report.clusters_formed);
+                        println!(
+                            "   Patrones detectados:  {}",
+                            report.patterns_detected.len()
+                        );
+                        println!("   Hipótesis generadas:  {}", report.hypotheses.len());
+                        println!(
+                            "   Conflictos señalados: {}",
+                            report.conflicts_detected.len()
+                        );
+                        if args.dry_run {
+                            println!(
+                                "   Modo:                 SIMULACIÓN (dry-run, no persistido)"
+                            );
+                        }
+                        println!("\n📊 Resumen:\n   {}", report.summary);
+
+                        if !report.conflicts_detected.is_empty() {
+                            println!("\n⚠️ Contradicciones detectadas:");
+                            for conflict in &report.conflicts_detected {
+                                println!(
+                                    "   - Conflicto [{}] (Tipo: {})",
+                                    conflict.id,
+                                    conflict.conflict_type.as_str()
+                                );
+                                println!("     Razón: {}", conflict.reason);
+                                if let Some(ref sugg) = conflict.suggested_resolution {
+                                    println!("     Sugerencia: {}", sugg);
+                                }
+                            }
+                            println!("   (Usa 'brain conflicts resolve <ID> --resolution <TEXT>' para resolverlos)");
+                        }
+
+                        if !report.hypotheses.is_empty() {
+                            println!("\n💡 Hipótesis candidatas creadas:");
+                            for hyp in &report.hypotheses {
+                                println!(
+                                    "   - {} (Confianza sugerida: {:.2})",
+                                    hyp.statement, hyp.suggested_confidence
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Error durante la reflexión: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Conflicts(args) => {
+            let ctx = match build_context(cli.in_memory, cli.database_url, cli.embedding_url).await
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    eprintln!("❌ {err}");
+                    std::process::exit(1);
+                }
+            };
+
+            match args.command {
+                ConflictCommands::List(list_args) => {
+                    let use_case = ListConflictsUseCase::new(ctx.conflict_repo);
+                    let query = ListConflictsQuery {
+                        project: list_args.project,
+                    };
+
+                    match use_case.execute(query).await {
+                        Ok(conflicts) => {
+                            if list_args.json {
+                                match serde_json::to_string_pretty(&conflicts) {
+                                    Ok(j) => println!("{j}"),
+                                    Err(e) => {
+                                        eprintln!("❌ Error serializando a JSON: {e}");
+                                        std::process::exit(1);
+                                    }
+                                }
+                            } else {
+                                println!("🧠 Local Brain — Contradicciones Pendientes (SRS §18)");
+                                println!("───────────────────────────────────────────────────");
+                                if conflicts.is_empty() {
+                                    println!("✅ No hay contradicciones pendientes.");
+                                } else {
+                                    for c in &conflicts {
+                                        println!("⚡ Conflicto ID:         {}", c.id);
+                                        println!(
+                                            "   Tipo:                 {}",
+                                            c.conflict_type.as_str()
+                                        );
+                                        println!("   Razón:                {}", c.reason);
+                                        println!("   Memoria Origen:       {}", c.source_memory_id);
+                                        println!(
+                                            "   Memoria En Conflicto: {}",
+                                            c.conflicting_memory_id
+                                        );
+                                        if let Some(ref sugg) = c.suggested_resolution {
+                                            println!("   Resolución sugerida:  {}", sugg);
+                                        }
+                                        println!("   Detectado:            {}", c.detected_at);
+                                        println!("   ─────────────────────────────────────────");
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error al listar conflictos: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                ConflictCommands::Resolve(res_args) => {
+                    let conflict_id = match ConflictId::from_str(&res_args.id) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            eprintln!("❌ Identificador de conflicto inválido: {e}");
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let use_case = ResolveConflictUseCase::new(ctx.conflict_repo, ctx.memory_repo);
+                    let cmd = ResolveConflictCommand {
+                        conflict_id,
+                        resolution_context: res_args.resolution,
+                    };
+
+                    match use_case.execute(cmd).await {
+                        Ok(resolved) => {
+                            println!("✅ Conflicto resuelto exitosamente");
+                            println!("   Conflicto ID: {}", resolved.id);
+                            println!(
+                                "   Estado:       {}",
+                                resolved.status.as_str().to_uppercase()
+                            );
+                            if let Some(ref ctx_text) = resolved.resolution_context {
+                                println!("   Contexto:     {}", ctx_text);
+                            }
+                            println!("   Las memorias han sido restauradas al estado ACTIVE con contexto actualizado.");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Error al resolver conflicto: {e}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
         }

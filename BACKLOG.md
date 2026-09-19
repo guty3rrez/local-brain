@@ -19,7 +19,7 @@ Este repositorio se desarrolla de forma abierta y continua. La siguiente tabla r
 | **Fase 4** | Memory Types Specialization | 🟢 Completado | `[██████████] 100%` | Unit + Integration + BDD + MCP + CLI |
 | **Fase 5** | Knowledge Graph & Relations | 🟢 Completado | `[██████████] 100%` | Pure Domain + PostgreSQL CTEs + Stress 1k + MCP Tools + CLI + BDD |
 | **Fase 6** | Learning & Candidate Knowledge | 🟢 Completado | `[██████████] 100%` | Pure Domain + Confidence Scoring + PostgreSQL + MCP brain_learn/brain_explain + CLI + BDD |
-| **Fase 7** | Consolidation & Reflection | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Integration + BDD |
+| **Fase 7** | Consolidation & Reflection | 🟢 Completado | `[██████████] 100%` | Pure Domain + Clustering + Conflict Detection + PostgreSQL + MCP brain_consolidate + CLI reflect/conflicts + BDD |
 | **Fase 8** | Advanced Hybrid Retrieval & Scoring | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Benchmarks + Unit |
 | **Fase 9** | Hardening, Benchmarking & Production | ⚪ Planificado | `[░░░░░░░░░░] 0%` | Full Arsenal |
 
@@ -257,15 +257,15 @@ Una tarea o historia de usuario se considerará **terminada** únicamente cuando
 ### Fase 7 — Consolidación & Reflexión (SRS §16, §17, §18, §68)
 *Objetivo: Consolidación periódica de experiencias, detección de patrones y contradicciones.*
 
-- [ ] **[F7-01] Motor de Reflexión Asíncrono (`brain reflect`)** `P2`
+- [x] **[F7-01] Motor de Reflexión Asíncrono (`brain reflect`)** `P2`
   - **Descripción**: Crate `brain-consolidation`. Agrupa experiencias recientes, identifica patrones y genera hipótesis candidatas.
-  - **Arsenal**: *Integration*: Pipeline de reflexión con mock LLM.
-- [ ] **[F7-02] Detección de Contradicciones y Flag `CONFLICT`** `P1`
+  - **Arsenal**: *Integration*: Pipeline de reflexión con mock LLM y fallback heurístico determinista.
+- [x] **[F7-02] Detección de Contradicciones y Flag `CONFLICT`** `P1`
   - **Descripción**: Si un nuevo conocimiento contradice uno existente, el sistema marca `CONFLICT` y requiere contexto o resolución humana.
   - **Arsenal**:
     - *Unit*: Detección de contradicción lógica y semántica.
     - *BDD*: "Given contradictory experiences, When consolidation runs, Then a CONFLICT state is raised".
-- [ ] **[F7-03] Tool MCP `brain_consolidate`** `P2`
+- [x] **[F7-03] Tool MCP `brain_consolidate`** `P2`
   - **Descripción**: Permite a un agente o job programado consolidar clusters de memorias.
   - **Arsenal**: *Integration* + *BDD*.
 

@@ -185,6 +185,31 @@ pub fn wrap_untrusted_explanation(explanation: &str, conclusion: &str, confidenc
     )
 }
 
+/// Envuelve el resultado de una consolidación o reflexión en delimitadores de contexto no confiable (SRS §16, §17, §32).
+pub fn wrap_untrusted_consolidation(
+    summary: &str,
+    hypotheses_count: usize,
+    conflicts_count: usize,
+) -> String {
+    let sanitized_text = summary
+        .replace(
+            "</untrusted_consolidation_context>",
+            "&lt;/untrusted_consolidation_context&gt;",
+        )
+        .replace(
+            "<untrusted_consolidation_context>",
+            "&lt;untrusted_consolidation_context&gt;",
+        );
+
+    format!(
+        "{notice}\n\n<untrusted_consolidation_context hypotheses=\"{hypotheses_count}\" conflicts=\"{conflicts_count}\">\n{content}\n</untrusted_consolidation_context>",
+        notice = PROMPT_INJECTION_SECURITY_NOTICE,
+        hypotheses_count = hypotheses_count,
+        conflicts_count = conflicts_count,
+        content = sanitized_text
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

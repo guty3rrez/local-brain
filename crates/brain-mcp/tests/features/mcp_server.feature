@@ -40,3 +40,11 @@ Característica: Servidor Model Context Protocol (MCP) para interacción con age
     Entonces la respuesta confirma que el aprendizaje fue registrado
     Cuando el agente solicita una explicación con "brain_explain" para ".NET es ideal"
     Entonces la respuesta contiene la conclusión ".NET es ideal para arquitecturas limpias" con protección de contexto
+
+  Escenario: Agente consolida experiencias mediante herramienta MCP brain_consolidate
+    Dado un servidor MCP activo con política de seguridad completa
+    Cuando el agente registra el recuerdo "Patrón Result en Rust para control de errores 1" para el proyecto "rust-patterns"
+    Y el agente registra el recuerdo "Patrón Result en Rust para control de errores 2" para el proyecto "rust-patterns"
+    Y el agente ejecuta la herramienta "brain_consolidate" para el proyecto "rust-patterns"
+    Entonces la respuesta confirma la consolidación con reporte protegido por delimitador
+

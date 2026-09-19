@@ -17,6 +17,7 @@ brain-infrastructure = { path = "../brain-infrastructure" }
 brain-mcp = { path = "../brain-mcp" }
 brain-graph = { path = "../brain-graph" }
 brain-learning = { path = "../brain-learning" }
+brain-consolidation = { path = "../brain-consolidation" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

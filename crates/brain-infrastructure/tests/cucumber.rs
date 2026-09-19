@@ -8,9 +8,12 @@ use cucumber::{given, then, when, World};
 use sqlx::postgres::PgPoolOptions;
 
 use brain_application::{
-    AddEvidenceCommand, AddEvidenceUseCase, ExplainQuery, ExplainUseCase, ExplanationReport,
-    LearnCommand, LearnResult, LearnUseCase,
+    AddEvidenceCommand, AddEvidenceUseCase, ConsolidateUseCase, ExplainQuery, ExplainUseCase,
+    ExplanationReport, LearnCommand, LearnResult, LearnUseCase, ReflectCommand, ReflectUseCase,
+    ResolveConflictCommand, ResolveConflictUseCase,
 };
+use brain_consolidation::model::{Contradiction, ReflectionReport};
+use brain_consolidation::ports::ConflictRepository;
 use brain_domain::model::{
     AssociativeMemoryData, EpisodicMemoryData, Memory, MemoryContent, MemoryId, MemoryOrigin,
     MemoryStatus, MemoryType, MemoryTypeData, ProceduralMemoryData, ProcedureStep, Provenance,
@@ -23,8 +26,10 @@ use brain_graph::model::{
 };
 use brain_graph::ports::GraphRepository;
 use brain_infrastructure::persistence::{
-    PostgresGraphRepository, PostgresLearningRepository, PostgresMemoryRepository,
+    PostgresConflictRepository, PostgresGraphRepository, PostgresLearningRepository,
+    PostgresMemoryRepository,
 };
+use brain_infrastructure::{LlamaCppReflectionClient, LlamaCppReflectionConfig};
 use brain_learning::model::EvidenceSourceType;
 use brain_learning::ports::LearningRepository;
 use std::sync::Arc;
@@ -34,6 +39,7 @@ pub struct MemoryWorld {
     repo: Option<PostgresMemoryRepository>,
     graph_repo: Option<PostgresGraphRepository>,
     learning_repo: Option<PostgresLearningRepository>,
+    conflict_repo: Option<PostgresConflictRepository>,
     saved_memory: Option<Memory>,
     retrieved_memory: Option<Memory>,
     indexed_vector: Option<Vec<f32>>,
@@ -47,6 +53,12 @@ pub struct MemoryWorld {
     learn_uc: Option<Arc<LearnUseCase>>,
     add_evidence_uc: Option<Arc<AddEvidenceUseCase>>,
     explain_uc: Option<Arc<ExplainUseCase>>,
+    reflect_uc: Option<Arc<ReflectUseCase>>,
+    consolidate_uc: Option<Arc<ConsolidateUseCase>>,
+    resolve_conflict_uc: Option<Arc<ResolveConflictUseCase>>,
+    reflection_report: Option<ReflectionReport>,
+    active_conflict: Option<Contradiction>,
+    last_registered_memories: Vec<Memory>,
 }
 
 impl std::fmt::Debug for MemoryWorld {
@@ -961,6 +973,338 @@ async fn then_explanation_human_validated(world: &mut MemoryWorld) {
     assert!(report
         .formatted_explanation
         .contains("Validación Humana:\nSí"));
+}
+
+#[given(expr = "un repositorio PostgreSQL conectado con soporte de consolidación")]
+async fn given_connected_consolidation_repo(world: &mut MemoryWorld) {
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://localbrain:localbrain_secret@localhost:5433/local_brain".to_string()
+    });
+
+    let pool = PgPoolOptions::new()
+        .max_connections(3)
+        .acquire_timeout(Duration::from_secs(3))
+        .connect(&database_url)
+        .await
+        .expect("Debe conectar con PostgreSQL");
+
+    let mem_repo = PostgresMemoryRepository::new(pool.clone());
+    mem_repo
+        .run_migrations()
+        .await
+        .expect("Migraciones de memoria");
+
+    let graph_repo = PostgresGraphRepository::new(pool.clone());
+    graph_repo
+        .run_migrations()
+        .await
+        .expect("Migraciones de grafo");
+
+    let learning_repo = PostgresLearningRepository::new(pool.clone());
+    learning_repo
+        .run_migrations()
+        .await
+        .expect("Migraciones de aprendizaje");
+
+    let conflict_repo = PostgresConflictRepository::new(pool.clone());
+    conflict_repo
+        .run_migrations()
+        .await
+        .expect("Migraciones de consolidación");
+
+    // Limpiar tablas para aislamiento de pruebas
+    let _ = sqlx::query("DELETE FROM knowledge_conflicts")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM consolidation_runs")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM graph_edges").execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM graph_nodes").execute(&pool).await;
+    let _ = sqlx::query("DELETE FROM learning_evidence")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM learning_candidates")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM memories WHERE project IN ('bdd-consolidation', 'conflict-proj', 'conflict-test')").execute(&pool).await;
+
+    let mem_repo_arc = Arc::new(mem_repo.clone());
+    let graph_repo_arc = Arc::new(graph_repo.clone());
+    let learning_repo_arc = Arc::new(learning_repo.clone());
+    let conflict_repo_arc = Arc::new(conflict_repo.clone());
+    let llm_config = LlamaCppReflectionConfig::new("http://localhost:8080");
+    let llm_client = Arc::new(LlamaCppReflectionClient::new(llm_config).expect("Cliente LLM"));
+
+    let reflect_uc = Arc::new(
+        ReflectUseCase::new(
+            mem_repo_arc.clone(),
+            conflict_repo_arc.clone(),
+            llm_client.clone(),
+        )
+        .with_graph_repository(Some(graph_repo_arc.clone()))
+        .with_learning_repository(Some(learning_repo_arc.clone())),
+    );
+
+    let consolidate_uc = Arc::new(
+        ConsolidateUseCase::new(mem_repo_arc.clone(), conflict_repo_arc.clone(), llm_client)
+            .with_learning_repository(Some(learning_repo_arc)),
+    );
+
+    let resolve_uc = Arc::new(ResolveConflictUseCase::new(
+        conflict_repo_arc.clone(),
+        mem_repo_arc.clone(),
+    ));
+
+    world.repo = Some(mem_repo);
+    world.graph_repo = Some(graph_repo);
+    world.learning_repo = Some(learning_repo);
+    world.conflict_repo = Some(conflict_repo);
+    world.reflect_uc = Some(reflect_uc);
+    world.consolidate_uc = Some(consolidate_uc);
+    world.resolve_conflict_uc = Some(resolve_uc);
+    world.last_registered_memories = Vec::new();
+}
+
+#[when(expr = "registro una memoria episódica con contenido {string} para el proyecto {string}")]
+async fn when_register_episodic_memory(
+    world: &mut MemoryWorld,
+    content_str: String,
+    project: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let content = MemoryContent::new(content_str).expect("Contenido válido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let mem = Memory::new_episodic(content, prov, Some(project));
+    repo.save(&mem).await.expect("Debe guardar memoria");
+    world.last_registered_memories.push(mem);
+}
+
+#[when(expr = "registro una memoria de preferencia {string} para el proyecto {string}")]
+async fn when_register_preference_memory(
+    world: &mut MemoryWorld,
+    content_str: String,
+    project: String,
+) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    let content = MemoryContent::new(content_str).expect("Contenido válido");
+    let prov = Provenance::new(MemoryOrigin::Observation).with_agent("bdd-agent");
+    let mem = Memory::new_episodic(content, prov, Some(project));
+    repo.save(&mem).await.expect("Debe guardar memoria");
+    world.last_registered_memories.push(mem);
+}
+
+#[when(expr = "ejecuto el proceso de reflexión para el proyecto {string}")]
+async fn when_execute_reflection(world: &mut MemoryWorld, project: String) {
+    let uc = world
+        .reflect_uc
+        .as_ref()
+        .expect("ReflectUseCase no inicializado");
+    let cmd = ReflectCommand::new().with_project(project);
+    let report = uc.execute(cmd).await.expect("Debe ejecutar reflexión");
+    world.reflection_report = Some(report);
+}
+
+#[then(expr = "el reporte de reflexión contiene al menos {int} cluster formado")]
+async fn then_reflection_has_clusters(world: &mut MemoryWorld, min_clusters: usize) {
+    let report = world
+        .reflection_report
+        .as_ref()
+        .expect("Reporte no disponible");
+    assert!(
+        report.clusters_formed >= min_clusters,
+        "Clusters formados {} menor que {}",
+        report.clusters_formed,
+        min_clusters
+    );
+}
+
+#[then(expr = "se genera al menos {int} hipótesis candidata con confianza no superior a {float}")]
+async fn then_hypotheses_generated(world: &mut MemoryWorld, min_hyp: usize, max_conf: f32) {
+    let report = world
+        .reflection_report
+        .as_ref()
+        .expect("Reporte no disponible");
+    assert!(
+        report.hypotheses.len() >= min_hyp,
+        "Hipótesis generadas {} menor que {}",
+        report.hypotheses.len(),
+        min_hyp
+    );
+    for h in &report.hypotheses {
+        assert!(
+            h.suggested_confidence <= max_conf + f32::EPSILON,
+            "Confianza {} de hipótesis supera {}",
+            h.suggested_confidence,
+            max_conf
+        );
+    }
+}
+
+#[then(expr = "la hipótesis candidata referencia las memorias como evidencias")]
+async fn then_hypothesis_references_evidences(world: &mut MemoryWorld) {
+    let report = world
+        .reflection_report
+        .as_ref()
+        .expect("Reporte no disponible");
+    let hyp = report.hypotheses.first().expect("Al menos una hipótesis");
+    assert!(
+        !hyp.source_memory_ids.is_empty(),
+        "Debe contener referencias de evidencia"
+    );
+}
+
+#[then(expr = "se detecta al menos {int} contradicción")]
+async fn then_contradiction_detected(world: &mut MemoryWorld, min_conflicts: usize) {
+    let report = world
+        .reflection_report
+        .as_ref()
+        .expect("Reporte no disponible");
+    assert!(
+        report.conflicts_detected.len() >= min_conflicts,
+        "Conflictos detectados {} menor a {}",
+        report.conflicts_detected.len(),
+        min_conflicts
+    );
+}
+
+#[then(expr = "las memorias involucradas pasan a estado {string}")]
+async fn then_memories_status_conflict(world: &mut MemoryWorld, expected_status: String) {
+    let repo = world.repo.as_ref().expect("Repositorio no inicializado");
+    for mem in &world.last_registered_memories {
+        let refreshed = repo
+            .find_by_id(&mem.id)
+            .await
+            .expect("Debe buscar")
+            .expect("Debe existir");
+        let status_str = format!("{:?}", refreshed.status);
+        assert_eq!(
+            status_str.to_lowercase(),
+            expected_status.to_lowercase(),
+            "Estado de memoria debe ser {}",
+            expected_status
+        );
+    }
+}
+
+#[then(expr = "existe una relación {string} entre ambas memorias en el grafo")]
+async fn then_relation_contradicts_in_graph(world: &mut MemoryWorld, rel: String) {
+    let graph = world.graph_repo.as_ref().expect("Grafo no inicializado");
+    assert!(world.last_registered_memories.len() >= 2);
+    let id_a = world.last_registered_memories[0].id;
+    let id_b = world.last_registered_memories[1].id;
+
+    let node_a = graph
+        .find_node_by_memory_id(&id_a)
+        .await
+        .expect("Query")
+        .expect("Nodo A");
+    let node_b = graph
+        .find_node_by_memory_id(&id_b)
+        .await
+        .expect("Query")
+        .expect("Nodo B");
+
+    let edge_fwd = graph
+        .find_edge(&node_a.id, &node_b.id, RelationType::Contradicts)
+        .await
+        .expect("Query edge");
+    let edge_bwd = graph
+        .find_edge(&node_b.id, &node_a.id, RelationType::Contradicts)
+        .await
+        .expect("Query edge");
+    assert!(
+        edge_fwd.is_some() || edge_bwd.is_some(),
+        "Debe existir arista {} entre nodo A y B (en cualquier dirección)",
+        rel
+    );
+}
+
+#[given(expr = "una contradicción registrada entre dos memorias en el repositorio PostgreSQL")]
+async fn given_registered_contradiction(world: &mut MemoryWorld) {
+    given_connected_consolidation_repo(world).await;
+
+    let repo = world.repo.as_ref().expect("Repo");
+    let content_a = MemoryContent::new("Uso exclusivo de Supabase para el backend").unwrap();
+    let content_b = MemoryContent::new("Uso exclusivo de .NET para el backend").unwrap();
+    let mem_a = Memory::new_episodic(
+        content_a,
+        Provenance::new(MemoryOrigin::Observation),
+        Some("conflict-test".to_string()),
+    );
+    let mem_b = Memory::new_episodic(
+        content_b,
+        Provenance::new(MemoryOrigin::Observation),
+        Some("conflict-test".to_string()),
+    );
+
+    repo.save(&mem_a).await.unwrap();
+    repo.save(&mem_b).await.unwrap();
+    world.last_registered_memories = vec![mem_a.clone(), mem_b.clone()];
+
+    let conflict = Contradiction::new(
+        mem_a.id,
+        mem_b.id,
+        brain_consolidation::model::ConflictType::MutuallyExclusivePreference,
+        "Colisión Supabase vs .NET".to_string(),
+    )
+    .expect("Contradicción válida");
+    let conflict_repo = world.conflict_repo.as_ref().expect("Conflict repo");
+    conflict_repo.save_conflict(&conflict).await.unwrap();
+
+    let mut a = mem_a.clone();
+    a.status = MemoryStatus::Conflict;
+    repo.update(&a).await.unwrap();
+
+    let mut b = mem_b.clone();
+    b.status = MemoryStatus::Conflict;
+    repo.update(&b).await.unwrap();
+
+    world.active_conflict = Some(conflict);
+}
+
+#[when(expr = "el usuario resuelve la contradicción con el contexto {string}")]
+async fn when_user_resolves_contradiction(world: &mut MemoryWorld, ctx: String) {
+    let uc = world
+        .resolve_conflict_uc
+        .as_ref()
+        .expect("ResolveConflictUseCase");
+    let conflict = world.active_conflict.as_ref().expect("Conflicto activo");
+    let resolved = uc
+        .execute(ResolveConflictCommand {
+            conflict_id: conflict.id,
+            resolution_context: ctx,
+        })
+        .await
+        .expect("Debe resolver conflicto");
+    world.active_conflict = Some(resolved);
+}
+
+#[then(expr = "el estado del conflicto cambia a {string}")]
+async fn then_conflict_status_is(world: &mut MemoryWorld, expected_status: String) {
+    let conflict = world.active_conflict.as_ref().expect("Conflicto");
+    let status_str = format!("{:?}", conflict.status);
+    assert_eq!(
+        status_str.to_lowercase(),
+        expected_status.to_lowercase(),
+        "Estado del conflicto debe ser {}",
+        expected_status
+    );
+}
+
+#[then(expr = "ambas memorias vuelven a estado {string}")]
+async fn then_both_memories_restored_to(world: &mut MemoryWorld, expected_status: String) {
+    let repo = world.repo.as_ref().expect("Repo");
+    for mem in &world.last_registered_memories {
+        let refreshed = repo.find_by_id(&mem.id).await.unwrap().unwrap();
+        let status_str = format!("{:?}", refreshed.status);
+        assert_eq!(
+            status_str.to_lowercase(),
+            expected_status.to_lowercase(),
+            "Memoria debe volver a {}",
+            expected_status
+        );
+    }
 }
 
 #[tokio::main]

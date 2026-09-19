@@ -3,12 +3,17 @@
 //! Capa de aplicación y orquestación de casos de uso de Local Brain (SRS §8).
 //!
 //! Conecta los adaptadores primarios (MCP, CLI) con el modelo de dominio puro
-//! y coordina los puertos secundarios de persistencia y embeddings.
+//! y coordina los puertos secundarios de persistencia, embeddings, aprendizaje y consolidación.
 
+pub mod consolidation_use_cases;
 pub mod graph_use_cases;
 pub mod learning_use_cases;
 pub mod use_cases;
 
+pub use consolidation_use_cases::{
+    ConsolidateCommand, ConsolidateUseCase, ListConflictsQuery, ListConflictsUseCase,
+    ReflectCommand, ReflectUseCase, ResolveConflictCommand, ResolveConflictUseCase,
+};
 pub use graph_use_cases::{RelateCommand, RelateUseCase, TraverseGraphQuery, TraverseGraphUseCase};
 pub use learning_use_cases::{
     AddEvidenceCommand, AddEvidenceUseCase, ExplainQuery, ExplainUseCase, ExplanationReport,
