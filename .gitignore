@@ -8,7 +8,8 @@
 *.pdb
 
 # --- Local AI Models & Weights (never commit heavy weights) ---
-models/
+models/*
+!models/.gitkeep
 *.gguf
 *.bin
 *.safetensors

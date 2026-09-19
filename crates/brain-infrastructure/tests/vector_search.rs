@@ -77,6 +77,37 @@ async fn llama_cpp_embedding_provider_wiremock_openai_format() {
 }
 
 #[tokio::test]
+async fn llama_cpp_embedding_provider_wiremock_modern_nested_array_format() {
+    let mock_server = MockServer::start().await;
+
+    let dummy_embedding: Vec<f32> = vec![0.08; DEFAULT_EMBEDDING_DIMENSION];
+    let response_body = serde_json::json!([
+        {
+            "index": 0,
+            "embedding": [dummy_embedding]
+        }
+    ]);
+
+    Mock::given(method("POST"))
+        .and(path("/embedding"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
+        .mount(&mock_server)
+        .await;
+
+    let endpoint = format!("{}/embedding", mock_server.uri());
+    let config = LlamaCppConfig::new(endpoint);
+    let provider = LlamaCppEmbeddingProvider::new(config).unwrap();
+
+    let result = provider
+        .embed("Compatibilidad con formato array anidado de llama-server reciente")
+        .await
+        .unwrap();
+
+    assert_eq!(result.len(), DEFAULT_EMBEDDING_DIMENSION);
+    assert_eq!(result[0], 0.08);
+}
+
+#[tokio::test]
 async fn llama_cpp_embedding_provider_dimension_mismatch_error() {
     let mock_server = MockServer::start().await;
 

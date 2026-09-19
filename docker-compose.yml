@@ -17,6 +17,43 @@ services:
       timeout: 5s
       retries: 5
 
+  download-models:
+    image: alpine:latest
+    container_name: local-brain-download-models
+    restart: "no"
+    volumes:
+      - ./models:/models
+    command: >
+      sh -c '
+      if [ ! -f /models/nomic-embed-text-v1.5.Q8_0.gguf ]; then
+        echo "📥 Descargando modelo de embeddings nomic-embed-text-v1.5.Q8_0.gguf (768 dim)..." &&
+        apk add --no-cache curl &&
+        curl -L --progress-bar -o /models/nomic-embed-text-v1.5.Q8_0.gguf "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf" &&
+        echo "✅ Modelo descargado exitosamente."
+      else
+        echo "✅ Modelo nomic-embed-text-v1.5.Q8_0.gguf ya presente en /models."
+      fi
+      '
+
+  embeddings:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: local-brain-embeddings
+    restart: unless-stopped
+    ports:
+      - "${EMBEDDINGS_PORT:-8081}:8081"
+    volumes:
+      - ./models:/models
+    depends_on:
+      download-models:
+        condition: service_completed_successfully
+    command: >
+      -m /models/nomic-embed-text-v1.5.Q8_0.gguf
+      --host 0.0.0.0
+      --port 8081
+      --embedding
+      -c 2048
+
 volumes:
   pgdata:
     name: local_brain_pgdata
+

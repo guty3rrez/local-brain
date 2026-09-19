@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tracing::{debug, error, instrument};
 
 use brain_domain::model::DomainError;
@@ -81,15 +81,12 @@ struct LlamaRequest<'a> {
     input: Option<&'a str>,
 }
 
-#[derive(Debug, Deserialize)]
-struct LlamaResponse {
-    embedding: Option<Vec<f32>>,
-    data: Option<Vec<OpenAiEmbeddingItem>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiEmbeddingItem {
-    embedding: Vec<f32>,
+fn parse_float_vec(val: &serde_json::Value) -> Option<Vec<f32>> {
+    val.as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_f64().map(|f| f as f32))
+            .collect()
+    })
 }
 
 #[async_trait]
@@ -132,22 +129,46 @@ impl EmbeddingProvider for LlamaCppEmbeddingProvider {
             )));
         }
 
-        let parsed: LlamaResponse = response.json().await.map_err(|e| {
+        let raw_json: serde_json::Value = response.json().await.map_err(|e| {
             DomainError::RepositoryError(format!(
                 "Respuesta inválida del servidor llama.cpp al deserializar JSON: {e}"
             ))
         })?;
 
-        let vector = match (parsed.embedding, parsed.data) {
-            (Some(v), _) => v,
-            (None, Some(mut data)) if !data.is_empty() => data.remove(0).embedding,
-            _ => {
-                return Err(DomainError::RepositoryError(
-                    "El servidor llama.cpp devolvió una respuesta sin campo 'embedding' ni 'data'"
-                        .to_string(),
-                ));
-            }
-        };
+        // 1. Formato OpenAI compatible: {"data": [{"embedding": [...]}]}
+        let vector_opt = raw_json
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|item| item.get("embedding"))
+            .and_then(parse_float_vec)
+            // 2. Formato clásico llama.cpp: {"embedding": [...]}
+            .or_else(|| raw_json.get("embedding").and_then(parse_float_vec))
+            // 3. Formato array reciente de llama-server: [{"embedding": [[...]]}] o [{"embedding": [...]}]
+            .or_else(|| {
+                raw_json
+                    .as_array()
+                    .and_then(|arr| arr.first())
+                    .and_then(|item| {
+                        item.get("embedding").and_then(|emb| {
+                            if let Some(nested) = emb
+                                .as_array()
+                                .and_then(|a| a.first())
+                                .and_then(parse_float_vec)
+                            {
+                                Some(nested)
+                            } else {
+                                parse_float_vec(emb)
+                            }
+                        })
+                    })
+            });
+
+        let vector = vector_opt.ok_or_else(|| {
+            DomainError::RepositoryError(
+                "El servidor llama.cpp devolvió una respuesta con estructura no reconocida (sin 'embedding' ni 'data')".to_string(),
+            )
+        })?;
 
         if vector.len() != self.config.expected_dimension {
             return Err(DomainError::RepositoryError(format!(

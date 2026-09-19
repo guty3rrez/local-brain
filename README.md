@@ -42,15 +42,66 @@ Monitorea el avance de las fases definidas en la especificación formal ([`SRS �
 | **Fase 0** | **Foundation & Governance** | 🟢 *Completado* | `[██████████] 100%` | Repositorio, AGPLv3, Backlog, Guías de Agentes, CI |
 | **Fase 1** | **Memory Core (MVP)** | 🟢 *Completado* | `[██████████] 100%` | Dominio puro, PostgreSQL (SQLx), CRUD y CLI persistente |
 | **Fase 2** | **Embeddings & Vector Search (MVP)** | 🟢 *Completado* | `[██████████] 100%` | llama.cpp local, pgvector HNSW (768 dim), búsqueda semántica |
-| **Fase 3** | **Model Context Protocol (MCP) (MVP)** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Servidor MCP (stdio/SSE), tools para agentes de IA |
-| **Fase 4** | **Especialización de Tipos de Memoria** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Working, Episodic, Semantic, Procedural, Associative |
-| **Fase 5** | **Knowledge Graph & Relaciones** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Grafo tipado, traversal y relaciones semánticas |
+| **Fase 3** | **Model Context Protocol (MCP) (MVP)** | 🟢 *Completado* | `[██████████] 100%` | Servidor MCP (stdio), 7 tools para agentes, mitigación prompt injection |
+| **Fase 4** | **Especialización de Tipos de Memoria** | 🟢 *Completado* | `[██████████] 100%` | Working (sesiones/TTL), Episodic, Semantic, Procedural, Associative |
+| **Fase 5** | **Knowledge Graph & Relaciones** | 🟢 *Completado* | `[██████████] 100%` | 10 relaciones canónicas, CTEs recursivos, DAGs sin ciclos, MCP y CLI |
 | **Fase 6** | **Learning & Candidate Knowledge** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Observación vs Creencia, confidence scoring |
 | **Fase 7** | **Consolidación & Reflexión** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | `brain reflect`, clustering, contradicciones (`CONFLICT`) |
 | **Fase 8** | **Advanced Hybrid Retrieval** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Pipeline híbrido, scoring multidimensional, olvido |
 | **Fase 9** | **Hardening & Producción** | ⚪ *Planificado* | `[░░░░░░░░░░] 0%` | Modo offline, benchmarks p95 < 500ms, backup |
 
 *Consulta el desglose completo de historias de usuario y criterios de aceptación en [BACKLOG.md](file:///home/guty_3rrez/Proyectos/local-brain/BACKLOG.md).*
+
+---
+
+## 🚀 Inicio Rápido (Quickstart)
+
+Local Brain incluye la orquestación automática de sus servicios auxiliares (PostgreSQL 17 + `pgvector` y runtime de embeddings `llama.cpp` con el modelo `nomic-embed-text-v1.5` de 768 dimensiones).
+
+### 1. Iniciar servicios locales (Automático)
+```bash
+# Descarga el modelo automáticamente y levanta PostgreSQL 17 + llama.cpp server
+docker compose up -d
+```
+*O ejecuta el script interactivo de bootstrap que valida dependencias y aplica migraciones:*
+```bash
+./scripts/setup-services.sh
+```
+
+### 2. Compilar e instalar la CLI
+```bash
+cargo build --release --bin brain
+install -m 755 target/release/brain ~/.local/bin/brain
+```
+
+### 3. Verificar estado del sistema
+```bash
+brain status
+```
+
+### 4. Conectar agentes mediante MCP
+Inicia el servidor MCP estándar sobre stdio:
+```bash
+brain mcp
+```
+
+Para conectarlo a clientes como Claude Desktop, Antigravity CLI, Cursor o Roo Code, agrega a tu configuración de `mcpServers`:
+```json
+{
+  "mcpServers": {
+    "local-brain": {
+      "command": "brain",
+      "args": [
+        "--database-url", "postgres://localbrain:localbrain_secret@localhost:5433/local_brain",
+        "mcp"
+      ],
+      "env": {
+        "EMBEDDING_URL": "http://127.0.0.1:8081/embedding"
+      }
+    }
+  }
+}
+```
 
 ---
 

@@ -1,0 +1,1 @@
+# Keep this directory in git. GGUF model files are gitignored and downloaded automatically via docker compose or scripts.
