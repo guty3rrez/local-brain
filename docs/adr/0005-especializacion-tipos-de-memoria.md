@@ -71,7 +71,6 @@ Se adopta la **Opción C**:
 
 ## Enlaces y Referencias
 
-* [SRS §10 — Tipos de Memoria](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L484)
-* [SRS §68 — Arquitectura de Memoria](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L3095)
-* [BACKLOG — Fase 4](file:///home/guty_3rrez/Proyectos/local-brain/BACKLOG.md)
+* [README — Tipos de Memoria Cognitiva](file:///home/guty_3rrez/Proyectos/local-brain/README.md)
+* [Skill Reference — memory-types.md](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/memory-types.md)
 * [ADR-0003 — Persistencia PostgreSQL](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr/0003-persistencia-postgresql-sqlx.md)

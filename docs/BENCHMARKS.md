@@ -1,11 +1,11 @@
 # 🚀 Local Brain — Benchmark de Rendimiento en Hardware de Referencia
 
-> **Especificación de pruebas de rendimiento reproducibles según SRS §49 y §50.**  
+> **Especificación de pruebas de rendimiento reproducibles.**  
 > Este documento define el entorno de medición, los umbrales de latencia y los resultados obtenidos en el perfil de hardware de consumo especificado.
 
 ---
 
-## 💻 1. Perfil de Hardware de Referencia (SRS §50)
+## 💻 1. Perfil de Hardware de Referencia
 
 Local Brain está diseñado para garantizar una experiencia ágil, fluida y con latencias sub-milisegundo en lógica central, ejecutándose en hardware de consumo común:
 

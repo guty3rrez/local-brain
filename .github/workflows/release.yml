@@ -1,0 +1,114 @@
+name: Release — Compilación y Publicación Multiplataforma
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Nombre del Tag / Release (ej: v1.0.0)"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 (glibc)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_name: brain
+            asset_name: brain-linux-x86_64.tar.gz
+            use_zip: false
+
+          # Linux x86_64 estático (musl - sin dependencias glibc)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin_name: brain
+            asset_name: brain-linux-x86_64-musl.tar.gz
+            use_zip: false
+
+          # Linux ARM64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bin_name: brain
+            asset_name: brain-linux-aarch64.tar.gz
+            use_zip: false
+
+          # macOS Intel (x86_64)
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bin_name: brain
+            asset_name: brain-macos-x86_64.tar.gz
+            use_zip: false
+
+          # macOS Apple Silicon (M1/M2/M3/M4 - aarch64)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin_name: brain
+            asset_name: brain-macos-aarch64.tar.gz
+            use_zip: false
+
+          # Windows x86_64 (MSVC)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: brain.exe
+            asset_name: brain-windows-x86_64.zip
+            use_zip: true
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar musl-tools en Linux si el target es musl
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Instalar Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Compilar binario de producción
+        run: cargo build --release --bin brain --target ${{ matrix.target }}
+
+      - name: Empaquetar artefacto (Unix - tar.gz)
+        if: matrix.use_zip == false
+        run: |
+          mkdir -p package
+          cp target/${{ matrix.target }}/release/${{ matrix.bin_name }} package/
+          cp README.md LICENSE brain.toml package/
+          cd package
+          tar -czf ../${{ matrix.asset_name }} *
+          cd ..
+          shasum -a 256 ${{ matrix.asset_name }} > ${{ matrix.asset_name }}.sha256
+
+      - name: Empaquetar artefacto (Windows - zip)
+        if: matrix.use_zip == true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package
+          Copy-Item target/${{ matrix.target }}/release/${{ matrix.bin_name }} package/
+          Copy-Item README.md, LICENSE, brain.toml package/
+          Compress-Archive -Path package/* -DestinationPath ${{ matrix.asset_name }}
+          $hash = (Get-FileHash -Algorithm SHA256 ${{ matrix.asset_name }}).Hash.ToLower()
+          "$hash  ${{ matrix.asset_name }}" | Out-File -Encoding ascii "${{ matrix.asset_name }}.sha256"
+
+      - name: Publicar binarios en GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag_name }}
+          files: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

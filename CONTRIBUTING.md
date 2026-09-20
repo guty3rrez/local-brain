@@ -9,7 +9,7 @@ Aceptamos contribuciones de **desarrolladores humanos y agentes de IA**. Para ma
 
 ## 🧭 ¿Cómo Puedo Colaborar?
 
-1. **Implementando Historias del Backlog**: Consulta [`BACKLOG.md`](file:///home/guty_3rrez/Proyectos/local-brain/BACKLOG.md) para encontrar historias marcadas como `[ ] Pendiente`. Si deseas trabajar en una, coméntalo en el issue correspondiente para asignártela y evitar duplicar esfuerzos.
+1. **Implementando Tareas y Mejoras**: Consulta los [GitHub Issues y Milestones](https://github.com/local-brain/local-brain/issues) para encontrar tareas disponibles. Si deseas trabajar en una, coméntalo en el issue correspondiente para asignártela y evitar duplicar esfuerzos.
 2. **Escribiendo Escenarios BDD y Casos de Prueba**: Redacta escenarios en Gherkin (`tests/features/`) que describan casos de uso reales de agentes de IA o agrega tests de mutación con `cargo-mutants`.
 3. **Proponiendo Decisiones Arquitectónicas (ADRs)**: Abre un Issue con la plantilla de RFC / ADR para discutir elecciones tecnológicas, esquemas de bases de datos o estrategias de embeddings.
 4. **Ejecutando Benchmarks**: Si tienes hardware con GPU NVIDIA, AMD o Apple Silicon, ayúdanos a correr los benchmarks de rendimiento y registrar métricas de consumo de VRAM y latencia.
@@ -46,7 +46,7 @@ Ejemplos:
 
 ## 🤖 Política de Contribuciones Asistidas por IA
 
-Local Brain es un proyecto desarrollado activamente en simbiosis humano-agente (SRS §39). Reconocemos y fomentamos las contribuciones apoyadas por agentes de IA bajo las siguientes reglas:
+Local Brain es un proyecto desarrollado activamente en simbiosis humano-agente. Reconocemos y fomentamos las contribuciones apoyadas por agentes de IA bajo las siguientes reglas:
 
 1. **Transparencia Obligatoria**: Si un Pull Request ha sido generado total o parcialmente por un agente de IA (Antigravity, Claude Code, Cursor, Codex, etc.), debe indicarse explícitamente en la descripción del PR.
 2. **Cumplimiento Estricto de [`AGENTS.md`](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md)**: El código generado por IA debe adherirse sin excepciones a las restricciones de arquitectura hexagonal, la prohibición de debilitar tests y el respeto al *Human Review Gate*.

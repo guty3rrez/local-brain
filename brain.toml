@@ -1,4 +1,4 @@
-# 🧠 Local Brain — Configuración de Recuperación Híbrida y Scoring (SRS §13, §14, §56, §58)
+# 🧠 Local Brain — Configuración de Recuperación Híbrida y Scoring
 
 [fusion]
 # Ponderación del canal vectorial semántico denso (pgvector HNSW)
@@ -11,7 +11,7 @@ graph_weight = 0.20
 rrf_k = 60.0
 
 [scoring]
-# Ponderaciones multidimensionales normalizadas (SRS §14)
+# Ponderaciones multidimensionales normalizadas
 semantic_weight = 0.40
 importance_weight = 0.25
 confidence_weight = 0.20
@@ -27,7 +27,7 @@ half_life_days = 30.0
 lambda = 0.023
 # Piso mínimo al que puede decaer un recuerdo no protegido
 min_decay_factor = 0.10
-# Umbral de importancia intrínseca para salvaguarda total contra decaimiento (SRS §58)
+# Umbral de importancia intrínseca para salvaguarda total contra decaimiento
 protected_importance_threshold = 0.85
 
 [limits]
@@ -43,7 +43,7 @@ graph_max_depth = 1
 graph_expansion_limit = 5
 
 [offline]
-# Modo offline estricto: bloquea llamadas salientes a nubes o redes externas (SRS §29, §51)
+# Modo offline estricto: bloquea llamadas salientes a nubes o redes externas
 enabled = true
 # Permite conexiones a interfaces de bucle invertido local (localhost, 127.0.0.1, ::1)
 allow_localhost = true

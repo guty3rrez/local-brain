@@ -49,7 +49,5 @@ Opción elegida: **Opción B: 768 dimensiones + pgvector con índice HNSW (`vect
 
 ## Enlaces y Referencias
 
-* [SRS §12 — Embeddings](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L597)
-* [SRS §13 — Retrieval Engine](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L649)
-* [SRS §25.2 — pgvector](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L1066)
+* [README — Motor de Embeddings y Búsqueda Semántica](file:///home/guty_3rrez/Proyectos/local-brain/README.md)
 * [ADR-0003 — Persistencia PostgreSQL](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr/0003-persistencia-postgresql-sqlx.md)

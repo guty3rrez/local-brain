@@ -35,5 +35,5 @@ Opción elegida: **Rust**, porque:
 
 ## Enlaces y Referencias
 
-* [SRS §8 — Arquitectura de Software](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L385)
-* [SRS §76 — Requerimientos no funcionales (RNF-001, RNF-006)](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md)
+* [README — Arquitectura de Software](file:///home/guty_3rrez/Proyectos/local-brain/README.md#%EF%B8%8F-arquitectura)
+* [AGENTS.md — Reglas y Clean Architecture](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md)

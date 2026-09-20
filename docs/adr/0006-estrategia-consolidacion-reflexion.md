@@ -65,8 +65,6 @@ Se adopta la **Opción C**:
 
 ## Enlaces y Referencias
 
-* [SRS §16: Motor de Reflexión y Consolidación](SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md)
-* [SRS §17: Formación de Hipótesis y Abstracciones](SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md)
-* [SRS §18: Detección y Resolución de Contradicciones](SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md)
-* [SRS §41 & §80: Regla de Oro y Human Review Gate](SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md)
+* [README — Motor de Consolidación y Reflexión](file:///home/guty_3rrez/Proyectos/local-brain/README.md)
+* [AGENTS.md — Reglas y Human Review Gate](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md)
 * [ADR-0005: Especialización de Tipos de Memoria](0005-especializacion-tipos-de-memoria.md)

@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "brain-application"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-consolidation",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "brain-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "assert_cmd",
  "brain-application",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "brain-consolidation"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-core",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "brain-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "thiserror 2.0.20",
  "tracing",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "brain-domain"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-core",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "brain-graph"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-core",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "brain-infrastructure"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-application",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "brain-learning"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-core",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "brain-mcp"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-application",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "brain-retrieval"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "brain-core",

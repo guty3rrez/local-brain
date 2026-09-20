@@ -32,4 +32,4 @@ Garantiza perpetuamente la libertad del software, fomenta la colaboración comun
 ## Enlaces y Referencias
 
 * [LICENSE (GNU AGPLv3)](file:///home/guty_3rrez/Proyectos/local-brain/LICENSE)
-* [SRS §4 — Principios de Diseño](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L115)
+* [README — Principios de Diseño y Licencia](file:///home/guty_3rrez/Proyectos/local-brain/README.md#-licencia)

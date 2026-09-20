@@ -47,7 +47,7 @@ Opción elegida: **PostgreSQL 17 + SQLx + UUID v7 (RFC 9562)**.
 
 ## Enlaces y Referencias
 
-* [SRS §9 — Modelo de Memoria](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L425)
-* [SRS §25 — Persistencia (PostgreSQL)](file:///home/guty_3rrez/Proyectos/local-brain/SRS%20%E2%80%94%20Local%20Brain_%20Memoria%20persistente%20local%20para%20agentes%20de%20IA.md#L1048)
+* [README — Persistencia y Servicios Locales](file:///home/guty_3rrez/Proyectos/local-brain/README.md#-inicio-r%C3%A1pido-quickstart)
+* [AGENTS.md — Autoridad Determinista](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md#13-no-confiar-ciegamente-en-el-llm-autoridad-determinista)
 * [RFC 9562 — Universally Unique IDentifiers (UUID)](https://www.rfc-editor.org/rfc/rfc9562.html)
 * [ADR-0001 — Adopción de Rust](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr/0001-lenguaje-rust.md)
