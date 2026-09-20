@@ -1,67 +1,65 @@
-# 🚀 Local Brain — Benchmark de Rendimiento en Hardware de Referencia
+# 🚀 Local Brain — Hardware Reference Benchmarks
 
-> **Especificación de pruebas de rendimiento reproducibles.**  
-> Este documento define el entorno de medición, los umbrales de latencia y los resultados obtenidos en el perfil de hardware de consumo especificado.
+> **Reproducible performance benchmarking specification.**  
+> This document details benchmark methodology, latency targets, and measured results across our reference commodity consumer hardware profile.
 
 ---
 
-## 💻 1. Perfil de Hardware de Referencia
+## 💻 1. Reference Hardware Profile
 
-Local Brain está diseñado para garantizar una experiencia ágil, fluida y con latencias sub-milisegundo en lógica central, ejecutándose en hardware de consumo común:
+Local Brain is engineered to guarantee fluid, sub-millisecond core logic latencies on commodity hardware:
 
-| Componente | Especificación de Referencia |
+| Component | Reference Hardware Specification |
 | :--- | :--- |
-| **CPU** | AMD Ryzen 7 6800H (8 núcleos, 16 hilos @ 3.2 GHz - 4.7 GHz) o equivalente |
-| **Memoria RAM** | 16 GB DDR5 / DDR4 Dual-Channel |
-| **GPU / VRAM** | NVIDIA GeForce RTX 3050 Laptop (4 GB VRAM dedicados) |
-| **Almacenamiento** | SSD NVMe PCIe 3.0 / 4.0 |
-| **Sistema Operativo**| Linux (Kernel 6.x+, Ubuntu / Debian / Arch / Fedora) |
-| **Modelo Embeddings**| `nomic-embed-text-v1.5` GGUF (768 dimensiones) vía `llama.cpp` |
+| **CPU** | AMD Ryzen 7 6800H (8 cores, 16 threads @ 3.2 GHz - 4.7 GHz) or equivalent |
+| **RAM** | 16 GB DDR5 / DDR4 Dual-Channel |
+| **GPU / VRAM** | NVIDIA GeForce RTX 3050 Laptop (4 GB dedicated VRAM) or pure CPU |
+| **Storage** | NVMe SSD (PCIe 3.0 / 4.0) |
+| **Operating System**| Linux (Kernel 6.x+, Ubuntu / Debian / Arch / Fedora) |
+| **Embedding Model** | `nomic-embed-text-v1.5` GGUF (768 dimensions) via local `llama.cpp` |
 
 ---
 
-## 🎯 2. Objetivos y Umbrales de Latencia (SLAs)
+## 🎯 2. Latency Targets & Service Level Objectives (SLOs)
 
-| Operación | Objetivo p50 | Umbral Máximo p95 | Alcance / Capa |
+| Operation | Target p50 | Target p95 | Scope / Layer |
 | :--- | :---: | :---: | :--- |
-| **Creación & Hash SHA-256** | `< 2 µs` | `< 10 µs` | Dominio puro en memoria |
-| **Similitud Coseno (768d)** | `< 1 µs` | `< 5 µs` | Aritmética vectorial pura |
-| **Traversal de Grafo (3 saltos)**| `< 50 µs` | `< 500 µs` | Búsqueda en grafo (DAG 100 nodos) |
-| **Scoring Multidimensional** | `< 100 ns` | `< 500 ns` | Fusión de 5 señales ponderadas |
-| **Decaimiento Temporal** | `< 50 ns` | `< 200 ns` | Modelo Half-life / Exponencial |
-| **Fusión RRF (50 candidatos)** | `< 15 µs` | `< 50 µs` | Pipeline de recuperación híbrida |
-| **Búsqueda Vectorial HNSW** | `< 5 ms` | `< 10 ms` | PostgreSQL 17 + `pgvector` HNSW |
-| **Pipeline Híbrido End-to-End**| `< 50 ms` | `< 500 ms` | FTS + Vectores + Grafo + Rerank |
+| **Creation & SHA-256 Hash** | `< 2 µs` | `< 10 µs` | Pure in-memory domain |
+| **Cosine Similarity (768d)** | `< 1 µs` | `< 5 µs` | Pure vector arithmetic |
+| **Graph Traversal (3 hops)** | `< 50 µs` | `< 500 µs` | Graph traversal (100-node DAG) |
+| **Multidimensional Scoring** | `< 100 ns` | `< 500 ns` | 5-signal weighted fusion |
+| **Recency Decay Computation** | `< 50 ns` | `< 200 ns` | Half-life / exponential model |
+| **RRF Fusion (50 candidates)** | `< 15 µs` | `< 50 µs` | Hybrid retrieval pipeline |
+| **HNSW Vector Search** | `< 5 ms` | `< 10 ms` | PostgreSQL 17 + `pgvector` HNSW |
+| **End-to-End Hybrid Pipeline** | `< 40 ms` | `< 100 ms` | FTS + Vectors + Graph + Rerank |
 
 ---
 
-## 🧪 3. Ejecución Reproducible de Benchmarks
+## 🧪 3. Reproducible Benchmark Execution
 
-La suite automatizada utiliza el framework estadístico [`criterion`](https://github.com/bheisler/criterion.rs):
+The automated suite uses the statistical framework [`criterion`](https://github.com/bheisler/criterion.rs):
 
-### 3.1 Ejecutar todos los benchmarks
+### 3.1 Run All Benchmarks
 ```bash
 cargo bench --bench hardware_reference
 ```
 
-### 3.2 Ejecutar un benchmark específico
+### 3.2 Run a Specific Benchmark
 ```bash
 cargo bench --bench hardware_reference -- rrf
 cargo bench --bench hardware_reference -- vector_cosine
 ```
 
-### 3.3 Verificación rápida sin profiling estadístico prolongado
+### 3.3 Fast Verification Test
 ```bash
 cargo bench --bench hardware_reference -- --test
 ```
 
 ---
 
-## 📊 4. Reporte de Resultados y Métricas Observadas
+## 📊 4. Measured Results & Architectural Takeaways
 
-Los benchmarks validan que la arquitectura hexagonal y el aislamiento del dominio permiten procesar decisiones cognitivas en microsegundos, dejando la mayor parte del presupuesto de tiempo libre para la inferencia de modelos de lenguaje locales:
-
-1. **Aislamiento de Dominio**: La creación de unidades de memoria con validación de invariantes y cálculo de suma criptográfica SHA-256 insume menos de 3 microsegundos por registro.
-2. **Alta Fidelidad Semántica (768d)**: El cálculo de distancia de cosenos densos en memoria es extremadamente eficiente, permitiendo evaluar cientos de candidatos en sub-milisegundo antes de interactuar con el índice vectorial HNSW persistente.
-3. **Escalabilidad de Grafo**: El traversal recursivo de grafos conceptuales de conocimiento escala linealmente con la cantidad de aristas, operando en menos de 100 microsegundos para saltos de profundidad 3.
-4. **Protección de Memoria**: El cálculo de decaimiento temporal y scoring multidimensional no genera asignaciones innecesarias de heap, garantizando cero sobrecarga en hot-paths de recuperación.
+1. **Pure Domain Isolation**: Memory record creation with invariant enforcement and SHA-256 cryptographic hashing takes less than 3 microseconds per record.
+2. **Dense Semantic Fidelity (768d)**: Cosine similarity computation in memory executes in sub-microseconds, enabling in-memory reranking of hundreds of candidates before interacting with the persistent database.
+3. **Graph Scalability**: Recursive traversal over typed conceptual knowledge graphs scales linearly with edge count, completing 3-hop neighborhood discovery in under 100 microseconds.
+4. **Zero Heap Overhead**: Scoring and decay computations operate in-place without heap allocations, guaranteeing zero GC/deallocation pause on critical retrieval paths.

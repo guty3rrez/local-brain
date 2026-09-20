@@ -1,33 +1,37 @@
-# Política de Seguridad y Modelo de Amenazas de Local Brain
+# Security Policy & Threat Model — Local Brain
 
-## 🔒 Política de Divulgación Responsable
-
-La seguridad de los datos y de la memoria de los usuarios es crítica. Si descubres una vulnerabilidad de seguridad en Local Brain, por favor **NO abras un issue público**.
-
-En su lugar, reporta la vulnerabilidad de manera privada creando un [Security Advisory en GitHub](https://github.com/local-brain/local-brain/security/advisories/new) o contactando directamente a los mantenedores del proyecto.
-
-Por favor incluye:
-- Descripción técnica de la vulnerabilidad.
-- Pasos detallados o prueba de concepto (PoC) para reproducirla.
-- Impacto potencial en la confidencialidad, integridad o disponibilidad de la memoria.
-
-Nos comprometemos a acusar recibo en un plazo de 48 horas y coordinar un parche antes de cualquier divulgación pública.
+🌐 **English** | [Español](SECURITY.es.md)
 
 ---
 
-## 🛡️ Modelo de Amenazas y Controles de Seguridad
+## 🔒 Responsible Disclosure Policy
 
-Local Brain implementa controles para mitigar el siguiente catálogo de amenazas específicas para agentes de IA e infraestructura de memoria cognitiva:
+Security and data integrity are paramount. If you discover a security vulnerability in Local Brain, please **DO NOT open a public issue**.
 
-| ID | Amenaza | Descripción | Control / Mitigación en Local Brain |
+Instead, report vulnerabilities privately by opening a [Security Advisory on GitHub](https://github.com/local-brain/local-brain/security/advisories/new) or contacting the maintainers directly.
+
+Please include:
+- Technical description of the vulnerability.
+- Step-by-step reproduction guide or Proof of Concept (PoC).
+- Potential impact on memory confidentiality, integrity, or availability.
+
+We commit to acknowledging reports within 48 hours and coordinating a security fix prior to public disclosure.
+
+---
+
+## 🛡️ Threat Model & Security Controls
+
+Local Brain implements controls mitigating threats specific to AI agents and cognitive memory systems:
+
+| ID | Threat | Description | Mitigation in Local Brain |
 | :--- | :--- | :--- | :--- |
-| **T-001** | **Prompt Injection** | Memorias que contienen texto malicioso intentando sobreescribir instrucciones del agente al ser recuperadas. | El contenido recuperado se encapsula estrictamente como **datos delimitados** (`<untrusted_memory_content>`), nunca como instrucciones de sistema. |
-| **T-002** | **Malicious MCP Client** | Un cliente o agente no autorizado que intenta emitir comandos privilegiados. | Separación estricta de permisos MCP (READ, WRITE, MODIFY, DELETE, ADMIN) y control estricto de transporte sobre stdio. |
-| **T-003** | **Memory Poisoning** | Agentes que registran recuerdos falsos para sesgar el comportamiento futuro. | Trazabilidad de procedencia (*provenance*), cálculo de confianza probabilístico y estado de conocimiento candidato. |
-| **T-004** | **Unauthorized Memory Deletion** | Borrado accidental o malicioso de la base de conocimiento acumulada. | Soft deletes por defecto, logs de auditoría inmutables y confirmación explícita (`confirm: true`) para operaciones destructivas. |
-| **T-005** | **Credential Leakage** | Filtración involuntaria de tokens, contraseñas o claves API hacia la memoria persistente. | Filtros de expresiones regulares de escaneo de secretos antes de persistir cualquier contenido de memoria. |
-| **T-006** | **Malicious Dependency** | Crate comprometida introducida en la cadena de compilación. | Bloqueo estricto con `cargo audit` y `cargo deny check` en el pipeline de CI. |
-| **T-007** | **Database Compromise** | Acceso no autorizado o corrupción de PostgreSQL / pgvector. | Principio de mínimo privilegio en conexiones DB, soporte para cifrado en reposo y backups periódicos (JSONL/SQL). |
-| **T-008** | **Supply-chain Attack** | Modificación maliciosa de binarios o modelos preentrenados. | Verificación de hashes SHA-256 de pesos de modelos locales (`.gguf`) y builds reproducibles. |
-| **T-009** | **Agent Hallucination** | Afirmaciones inventadas por el LLM asumidas como hechos. | Separación estricta entre **Observación** y **Creencia**; el LLM no tiene autoridad directa para crear hechos consolidados sin evidencia empírica. |
-| **T-010** | **Knowledge Poisoning** | Alteración sutil y progresiva del grafo de conocimiento. | Versionado inmutable de entidades de conocimiento con historial de cambios e identificación del autor. |
+| **T-001** | **Prompt Injection** | Memories containing adversarial text attempting to override agent system instructions upon retrieval. | Retrieved memory content is strictly framed inside **untrusted data delimiters** (`<untrusted_memory_content>`), never as system prompts. |
+| **T-002** | **Malicious MCP Client** | An unauthorized client attempting privileged destructive commands. | Strict MCP permission tiering (READ, WRITE, MODIFY, DELETE, ADMIN) and stdio process containment. |
+| **T-003** | **Memory Poisoning** | Adversarial agents storing falsified memories to skew future agent decisions. | Comprehensive provenance tracking, Bayesian-like empirical confidence scoring, and candidate belief stages. |
+| **T-004** | **Unauthorized Deletion** | Accidental or malicious wiping of accumulated knowledge. | Soft deletes by default, immutable audit logs, and explicit confirmation (`confirm: true`) for destructive commands. |
+| **T-005** | **Credential Leakage** | Inadvertent persistence of API keys, tokens, or passwords in memory. | Automated regex secret scanning filters before persisting any memory payload. |
+| **T-006** | **Malicious Dependency** | Compromised supply chain crate introduced in workspace. | Enforced `cargo audit` and `cargo deny check` in continuous integration. |
+| **T-007** | **Database Compromise** | Unauthorized access to PostgreSQL or pgvector data. | Least-privilege database connections, encryption at rest support, and cryptographic JSONL/SQL backups. |
+| **T-008** | **Supply-Chain Model Attack** | Tampered model weights or malicious runtime binaries. | SHA-256 hash verification of quantized GGUF weights and reproducible builds. |
+| **T-009** | **Agent Hallucination** | LLM-generated false claims treated as ground truth. | Strict separation of **Factual Observations** and **Candidate Beliefs**; LLMs lack direct authority to establish unverified facts. |
+| **T-010** | **Knowledge Poisoning** | Subtle drift or malicious alteration of the knowledge graph. | Immutable versioning of knowledge entities with revision history and author attribution. |

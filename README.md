@@ -1,101 +1,103 @@
 # 🧠 Local Brain
 
-> **Cerebro cognitivo local-first, memoria persistente y grafo de conocimiento para agentes de Inteligencia Artificial**
+> **Local-first, cognitive persistent memory & knowledge graph for AI coding agents via Model Context Protocol (MCP)**
+
+🌐 **English** | [Español](README.es.md)
 
 [![Version: v1.0.0](https://img.shields.io/badge/Version-v1.0.0-blue.svg)](https://github.com/local-brain/local-brain/releases)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust: 1.85+](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](https://github.com/local-brain/local-brain/actions)
 [![Protocol: Model Context Protocol (MCP)](https://img.shields.io/badge/Protocol-MCP_Standard-blueviolet.svg)](https://modelcontextprotocol.io/)
-[![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-arquitectura-del-sistema)
-[![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacidad-y-seguridad-local-first)
+[![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-system-architecture)
+[![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacy--local-first-security)
 
 ---
 
-## ⚡ El Problema: La Amnesia de los Agentes de IA
+## ⚡ The Problem: AI Agent Amnesia
 
-Los agentes de programación modernos (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) razonan con gran destreza dentro de una ventana de contexto, pero **pierden toda su experiencia al cerrar la sesión**. 
+Modern AI coding agents (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) excel at solving complex problems within a single context window, but they **completely lose their experience between sessions**.
 
-Cada nueva sesión comienza desde cero:
-- **Repiten los mismos errores** que ya resolvieron ayer.
-- **Ignoran las convenciones técnicas** y decisiones acordadas en el proyecto.
-- **Desconocen las causas y consecuencias** de decisiones pasadas.
+Every new session starts from scratch:
+- **Agents repeat the exact same errors** they already spent hours fixing yesterday.
+- **They ignore hard-earned architectural conventions** established in earlier turns.
+- **They cannot explain why a choice was made** (*"why did we migrate from library A to library B last week?"*).
 
-### ¿Por qué el RAG tradicional no resuelve esto?
-La mayoría de las herramientas intentan resolver la persistencia arrojando texto plano a una base de datos vectorial:
+### Why Traditional Vector RAG Fails for Agents
+Most existing tools try to solve persistence by dumping raw text or chat transcripts into a vector database:
 ```text
-Documento plano → embedding → vector database → similitud de cosenos
+Raw text chunk → embedding → vector database → cosine similarity search
 ```
-El RAG tradicional es un buscador de texto, **no un cerebro cognitivo**. No comprende causalidad (*"¿por qué preferimos la solución A sobre la B?"*), no distingue una hipótesis no probada de un hecho verificado, no modela secuencias de pasos técnicos y sufre de alucinaciones masivas cuando se acumulan contradicciones.
+Traditional RAG is a search engine, **not a cognitive brain**. It treats all text as flat chunks, ignores causality, cannot distinguish between an unverified hypothesis and an empirical fact, cannot model step-by-step procedures, and silently hallucinates when past decisions contradict each other.
 
 ---
 
-## 💡 La Solución: Local Brain
+## 💡 The Solution: Local Brain
 
-**Local Brain** es una infraestructura cognitiva local-first que dota a los agentes de IA de una **memoria estructurada a largo plazo** a través del estándar abierto **Model Context Protocol (MCP)**, garantizando que el usuario conserve la soberanía absoluta de sus datos en su propio hardware.
+**Local Brain** is an open-source, local-first cognitive infrastructure that equips AI agents with **structured long-term memory** through the open **Model Context Protocol (MCP)** standard, ensuring 100% privacy and full data sovereignty on the user's hardware.
 
-### 🧭 La Regla de Oro Cognitiva
-> **No construir un cerebro que simplemente recuerde todo.**  
-> Construir un sistema que sepa: **qué recordar, por qué recordarlo, cuándo recordarlo, qué tan confiable es, de dónde proviene, con qué está relacionado, cuándo dejó de ser válido y por qué llegó a creerlo.**
+### 🧭 The Golden Rule of Memory
+> **Do not build a brain that simply remembers everything.**  
+> Build a system that knows: **what to remember, why to remember it, when to recall it, how reliable it is, where it came from, how it is related, when it became invalid, and why it came to believe it.**
 
 ---
 
-## 📊 RAG Tradicional vs. Local Brain
+## 📊 Traditional Vector RAG vs. Local Brain
 
-| Característica | RAG Vectorial Tradicional | Local Brain v1.0 |
+| Capability | Traditional Vector RAG | Local Brain v1.0 |
 | :--- | :---: | :---: |
-| **Modelo de datos** | Texto plano desestructurado | **5 tipos cognitivos** (Working, Episodic, Semantic, Procedural, Associative) |
-| **Relaciones entre conceptos** | Inexistentes (solo cercanía en espacio latente) | **Grafo de Conocimiento tipado** (10 relaciones canónicas con DAG sin ciclos) |
-| **Causalidad y experiencia** | Ignorada | Tríada episódica formal: **Contexto ➔ Acción ➔ Resultado** |
-| **Validez y certeza** | Asume que todo texto almacenado es verdad | **Motor de Aprendizaje Empírico**: Observaciones vs Creencias con confianza bayesiana |
-| **Detección de contradicciones** | Ninguna (devuelve información contradictoria al azar) | **Motor de Reflexión y Consolidación**: Detección determinista de conflictos cognitivos |
-| **Estrategia de búsqueda** | Similitud de vectores aislada | **Recuperación Híbrida**: Vectores (768d) + Full-Text Search + Grafo + Recency Decay |
-| **Explicabilidad** | Caja negra | **Matemáticamente explicable** (`--explain` con desglose de señales) |
-| **Protección Prompt Injection** | Vulnerable (el texto recuperado puede hackear al agente) | **Aislamiento estricto**: Envoltorio delimitador de datos no confiables |
-| **Privacidad e Independencia** | Frecuentemente atado a APIs comerciales en la nube | **100% Offline, cero telemetría**, local en PostgreSQL + `llama.cpp` |
+| **Data Model** | Flat unstructured text chunks | **5 Specialized Cognitive Types** (Working, Episodic, Semantic, Procedural, Associative) |
+| **Relational Reasoning** | None (only distance in latent space) | **Typed Knowledge Graph** (10 canonical relations with cycle-safe DAGs) |
+| **Causality & Experience** | Ignored | Formal episodic triad: **Context ➔ Action ➔ Outcome** |
+| **Empirical Validity** | Assumes all stored text is true | **Empirical Learning Engine**: Fact vs. Belief with Bayesian-like confidence updates |
+| **Contradiction Detection** | None (surfaces opposing text randomly) | **Reflection Engine**: Deterministic conflict clustering and resolution |
+| **Retrieval Strategy** | Vector similarity only | **Hybrid Fusion**: Vectors (768d) + Lexical Full-Text Search + Graph + Recency Decay |
+| **Explainability** | Black-box scores | **Mathematically Explainable** (`--explain` with explicit signal breakdown) |
+| **Prompt Injection Defense** | Vulnerable (retrieved text can hijack prompt) | **Strict Isolation**: Wrapped in `<untrusted_memory_content>` delimiters |
+| **Privacy & Sovereignty** | Often tied to proprietary cloud APIs | **100% Offline, Zero Telemetry**, local PostgreSQL + `llama.cpp` |
 
 ---
 
-## 🚀 Inicio Rápido (En 2 Minutos)
+## 🚀 Quickstart (Zero to Hero in 2 Minutes)
 
-Local Brain incluye automatización completa para levantar sus servicios auxiliares (PostgreSQL 17 con `pgvector` y runtime local de embeddings `llama.cpp` con el modelo de alta fidelidad `nomic-embed-text-v1.5` de 768 dimensiones).
+Local Brain includes automated setup for all auxiliary local services (PostgreSQL 17 with `pgvector` and local `llama.cpp` server running the high-fidelity `nomic-embed-text-v1.5` 768-dimensional model).
 
-### Opción A: Asistente Automatizado (Recomendado)
+### Option A: Automated Onboarding Wizard (Recommended)
 ```bash
-# 1. Clonar el repositorio
+# 1. Clone the repository
 git clone https://github.com/local-brain/local-brain.git
 cd local-brain
 
-# 2. Ejecutar el asistente de onboarding
+# 2. Run the interactive setup script
 ./scripts/quickstart.sh
 ```
 
-El script se encarga de descargar el modelo GGUF cuantizado (~140 MB), levantar los contenedores Docker en segundo plano, ejecutar las migraciones de base de datos (`brain init`), verificar el diagnóstico de salud (`brain doctor`) y mostrar los bloques de configuración para tu cliente MCP.
+The script automatically downloads the quantized GGUF model (~140 MB), spins up background Docker containers, applies database migrations (`brain init`), verifies system health (`brain doctor`), and outputs ready-to-use MCP configuration blocks.
 
-### Opción B: Instalación Manual
+### Option B: Manual Setup
 ```bash
-# 1. Iniciar servicios con Docker Compose
+# 1. Start local services
 docker compose up -d
 
-# 2. Compilar e instalar la CLI
+# 2. Build and install the CLI
 cargo build --release --bin brain
 sudo install -m 755 target/release/brain /usr/local/bin/brain
 
-# 3. Inicializar la persistencia y aplicar migraciones
+# 3. Initialize the database and run migrations
 brain init
 
-# 4. Verificar salud del sistema
+# 4. Verify system diagnostics
 brain doctor
 ```
 
 ---
 
-## 🤖 Conectar tus Agentes de IA vía MCP
+## 🤖 Connect Your AI Agents via MCP
 
-Local Brain implementa el estándar **Model Context Protocol (MCP)** sobre `stdio`. Agrega la siguiente configuración en tu cliente favorito:
+Local Brain implements the **Model Context Protocol (MCP)** over `stdio`. Plug it into your favorite agent in seconds:
 
 ### 1. Claude Desktop
-Añade a tu archivo `claude_desktop_config.json`:
+Add to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
@@ -112,13 +114,13 @@ Añade a tu archivo `claude_desktop_config.json`:
 ```
 
 ### 2. Claude Code CLI
-Añade el servidor en un solo comando:
+Add the server with a single terminal command:
 ```bash
 claude mcp add local-brain brain -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
 ```
 
 ### 3. Cursor & Windsurf
-En `.cursor/mcp.json` o en los ajustes de MCP:
+In `.cursor/mcp.json` or your MCP Settings:
 ```json
 {
   "mcpServers": {
@@ -135,7 +137,7 @@ En `.cursor/mcp.json` o en los ajustes de MCP:
 ```
 
 ### 4. Cline / Roo Code (VS Code)
-En `cline_mcp_settings.json`:
+In `cline_mcp_settings.json`:
 ```json
 {
   "mcpServers": {
@@ -163,111 +165,111 @@ En `cline_mcp_settings.json`:
 
 ---
 
-## 🧠 Características Principales de Local Brain
+## 🧠 Core Features
 
-### 1. Especialización en 5 Tipos Cognitivos de Memoria
-El cerebro modela la memoria respetando invariantes formales de dominio:
-1. **Memoria de Trabajo (`working`)**: Estado temporal ligado a una sesión activa (`session_id`) con tiempo de vida en segundos (`ttl_seconds`). Se purga o archiva automáticamente al concluir la sesión.
-2. **Memoria Episódica (`episodic`)**: Captura la experiencia situada mediante la tríada rigurosa:
-   - **Contexto**: Situación o problema inicial.
-   - **Acción**: Decisión técnica o comando adoptado.
-   - **Resultado**: Consecuencia empírica real (logs, métricas, latencias).
-3. **Memoria Semántica (`semantic`)**: Hechos y principios generalizados con grado de certidumbre empírica (`confidence` $\in [0.0, 1.0]$). Si la confianza es $\ge 0.8$, **exige obligatoriamente** enlaces a UUIDs de evidencias que respalden la afirmación.
-4. **Memoria Procedimental (`procedural`)**: Secuencias ordenadas de pasos y comandos ejecutables (`steps`) orientados a un objetivo técnico claro (`goal`).
-5. **Memoria Asociativa (`associative`)**: Triplas conceptuales normalizadas (`source` ➔ `predicate` ➔ `target`) con fuerza de enlace.
+### 1. Five Specialized Cognitive Memory Types
+Memory is modeled with domain-level invariants in pure Rust:
+1. **Working Memory (`working`)**: Ephemeral state scoped to an active session (`session_id`) with a TTL (`ttl_seconds`). Automatically purged or archived when the session concludes.
+2. **Episodic Memory (`episodic`)**: Captures situated experience using the strict triad:
+   - **Context**: Problem or situation encountered.
+   - **Action**: Decision or command applied.
+   - **Outcome**: Observed empirical result (error logs, latency, behavior).
+3. **Semantic Memory (`semantic`)**: Generalized statements and principles with empirical confidence (`confidence` $\in [0.0, 1.0]$). If confidence $\ge 0.8$, it **strictly requires** supporting evidence UUIDs.
+4. **Procedural Memory (`procedural`)**: Ordered sequences of technical steps and executable commands (`steps`) aligned to a goal (`goal`).
+5. **Associative Memory (`associative`)**: Normalized conceptual triples (`source` ➔ `predicate` ➔ `target`) with associative link strength.
 
-### 2. Grafo de Conocimiento con Prevención de Ciclos
-Conecta recuerdos y entidades técnicas mediante 10 relaciones semánticas canónicas:
-- `RELATED_TO`: Relación asociativa general bidireccional.
-- `USED_IN`: Componente utilizado en un módulo o sistema.
-- `CAUSED_BY`: Relación causal de origen.
-- `SOLVES`: Solución técnica demostrada para un error o limitación.
-- `CONTRADICTS`: Incompatibilidad detectada entre decisiones o preferencias.
-- `SUPERSEDES`: Una decisión más reciente o superior reemplaza a una anterior.
-- `DERIVED_FROM`: Conocimiento sintetizado a partir de evidencias previas.
-- `DEPENDS_ON`: Dependencia arquitectónica o de entorno.
-- `PREFERS`: Directriz de preferencia explícita (ej. preferir PostgreSQL sobre bases embebidas).
-- `AVOID`: Directriz de exclusión explícita (ej. evitar dependencias con licencias restrictivas).
+### 2. Cycle-Safe Knowledge Graph
+Connects memories and entities through 10 canonical relations:
+- `RELATED_TO`: General bidirectional conceptual link.
+- `USED_IN`: Component utilized in a module or system.
+- `CAUSED_BY`: Causal provenance.
+- `SOLVES`: Proven technical resolution to an issue.
+- `CONTRADICTS`: Incompatibility between architectural decisions.
+- `SUPERSEDES`: Newer decision superseding an obsolete convention.
+- `DERIVED_FROM`: Knowledge synthesized from prior experiences.
+- `DEPENDS_ON`: Architectural or environment dependency.
+- `PREFERS`: Explicit positive guideline (e.g., prefer PostgreSQL over SQLite).
+- `AVOID`: Explicit anti-pattern guideline (e.g., avoid blocking I/O in async runtimes).
 
-> **Garantía DAG**: Las relaciones de dependencia, causalidad y reemplazo implementan algoritmos deterministas de prevención de ciclos en tiempo real, impidiendo bucles infinitos en el razonamiento de los agentes.
+> **DAG Cycle Prevention**: Causal and dependency edges enforce real-time cycle detection, preventing circular reasoning loops in autonomous agents.
 
-### 3. Motor de Aprendizaje Empírico & Confianza
-El sistema diferencia de forma estricta entre una **Observación Factual** puntual y una **Creencia Generalizada Candidata**:
-- Cada nueva evidencia de soporte o refutación actualiza dinámicamente la puntuación de confianza del conocimiento.
-- Soporta fuentes de evidencia tipadas (`Human`, `ToolExecution`, `DirectObservation`, `AgentHypothesis`).
-- Las validaciones explícitas de un usuario humano elevan la creencia al grado de máxima certeza.
+### 3. Empirical Learning & Bayesian-like Confidence
+The system enforces a strict boundary between a **Factual Observation** and a **Generalized Belief**:
+- Incoming evidence dynamically updates the confidence score of candidate beliefs.
+- Supports typed evidence sources (`Human`, `ToolExecution`, `DirectObservation`, `AgentHypothesis`).
+- Explicit human validation immediately elevates a belief to maximum certainty.
 
-### 4. Reflexión y Consolidación Asíncrona
-El subcomando `brain reflect` agrupa recuerdos episódicos recientes mediante clustering semántico, sintetiza patrones recurrentes y detecta automáticamente colisiones o contradicciones cognitivas (`CONFLICT`), permitiendo al desarrollador o al agente resolver la discrepancia de forma transparente.
+### 4. Asynchronous Reflection & Contradiction Resolution
+The `brain reflect` engine clusters recent episodic experiences, identifies emerging patterns, and automatically flags cognitive contradictions (`CONFLICT`), allowing humans or agents to resolve discrepancies cleanly.
 
-### 5. Motor de Recuperación Híbrida Multidimensional
-La herramienta `brain_retrieve` (y `brain retrieve` en la CLI) fusiona tres canales de recuperación simultáneos mediante **Reciprocal Rank Fusion (RRF)**:
-1. **Canal Vectorial Denso**: 768 dimensiones con distancia de coseno sobre índices HNSW en `pgvector`.
-2. **Canal Léxico Full-Text**: Consultas en lenguaje natural procesadas con `tsvector` y diccionarios de PostgreSQL.
-3. **Canal de Grafo**: Expansión recursiva multi-salto sobre conceptos y dependencias asociadas.
+### 5. Multidimensional Hybrid Retrieval Engine
+`brain_retrieve` fuses three parallel retrieval channels via **Reciprocal Rank Fusion (RRF)**:
+1. **Dense Vector Channel**: 768 dimensions with cosine distance over HNSW indexes in `pgvector`.
+2. **Lexical Full-Text Search**: Natural language queries parsed with PostgreSQL `tsvector` and GIN indexing.
+3. **Knowledge Graph Channel**: Multi-hop recursive neighborhood expansion.
 
-El ranking final aplica una función de **Scoring Multidimensional**:
+Final ranking is computed with **Multidimensional Scoring**:
 $$Score = w_{sem} \cdot S_{sim} + w_{imp} \cdot S_{imp} + w_{conf} \cdot S_{conf} + w_{util} \cdot S_{util} - w_{pen} \cdot P$$
-Multiplicado por un factor de **Decaimiento Temporal Exponencial**:
+Modulated by an **Exponential Half-Life Recency Decay**:
 $$D(t) = 2^{-t / T_{1/2}}$$
-*(Donde recuerdos con importancia intrínseca $\ge 0.85$ quedan protegidos contra el olvido).*
+*(Memories with intrinsic importance $\ge 0.85$ are shielded from decay).*
 
 ---
 
-## 💻 Manual de Comandos de la CLI (`brain`)
+## 💻 CLI Command Reference (`brain`)
 
 ```bash
-brain [FLAGS] <SUBCOMANDO>
+brain [FLAGS] <SUBCOMMAND>
 ```
 
-| Subcomando | Descripción | Ejemplo de Uso |
+| Subcommand | Purpose | Example |
 | :--- | :--- | :--- |
-| `init` | Inicializa esquemas y aplica migraciones SQLx en PostgreSQL | `brain init` |
-| `doctor` | Diagnostica salud de base de datos, pgvector y llama.cpp | `brain doctor --verbose` |
-| `status` | Muestra métricas del sistema y recuerdos almacenados | `brain status` |
-| `remember` | Almacena un recuerdo con tipo cognitivo especializado | `brain remember "Contexto..." --type episodic --project app` |
-| `recall` | Recuperación por búsqueda semántica vectorial (768d) | `brain recall -q "¿cómo migrar la base de datos?"` |
-| `retrieve` | Recuperación híbrida (Vector + FTS + Grafo + Scoring) | `brain retrieve "seguridad en autenticación" --explain` |
-| `relate` | Crea una arista tipada en el Grafo de Conocimiento | `brain relate Rust C++ --type PREFERS -w 0.9` |
-| `graph` | Explora vecindades recursivas en el grafo | `brain graph Rust --depth 2` |
-| `learn` | Registra una observación o creencia con evidencias | `brain learn "El índice HNSW acelera el recall" -e "benchmark local"` |
-| `explain` | Explica el fundamento y evidencias de una creencia | `brain explain "¿por qué usamos Rust?"` |
-| `reflect` | Ejecuta consolidación y clustering de experiencias | `brain reflect --project app` |
-| `conflicts` | Lista y resuelve contradicciones cognitivas pendientes | `brain conflicts list` |
-| `backup` | Exporta un respaldo seguro en formato JSONL o SQL | `brain backup -o backup.jsonl` |
-| `restore` | Restaura el cerebro desde un archivo con suma de integridad | `brain restore -i backup.jsonl` |
-| `mcp` | Inicia el servidor Model Context Protocol sobre stdio | `brain mcp` |
+| `init` | Initialize tables and apply SQLx migrations in PostgreSQL | `brain init` |
+| `doctor` | Diagnose health of PostgreSQL, pgvector, and llama.cpp | `brain doctor --verbose` |
+| `status` | View system metrics and memory distribution | `brain status` |
+| `remember` | Store a memory with cognitive specialization | `brain remember "Context..." --type episodic --project app` |
+| `recall` | Semantic vector search (768d) or ID lookup | `brain recall -q "database migration pattern"` |
+| `retrieve` | Hybrid retrieval (Vector + FTS + Graph + Decay Scoring) | `brain retrieve "auth security" --explain` |
+| `relate` | Create a typed edge in the Knowledge Graph | `brain relate Rust C++ --type PREFERS -w 0.9` |
+| `graph` | Traverse recursive graph neighborhoods | `brain graph Rust --depth 2` |
+| `learn` | Record an observation or belief with evidence | `brain learn "HNSW index reduces latency" -e "local bench"` |
+| `explain` | Explain the empirical foundation of a belief | `brain explain "why do we use Rust?"` |
+| `reflect` | Run offline consolidation and clustering | `brain reflect --project app` |
+| `conflicts` | List and resolve cognitive contradictions | `brain conflicts list` |
+| `backup` | Export a cryptographic backup in JSONL or SQL | `brain backup -o backup.jsonl` |
+| `restore` | Restore memory state with checksum validation | `brain restore -i backup.jsonl` |
+| `mcp` | Start Model Context Protocol server over stdio | `brain mcp` |
 
 ---
 
-## 🛠️ Catálogo de Herramientas MCP para Agentes
+## 🛠️ MCP Tools Catalog for Agents
 
-Local Brain expone 11 herramientas estándar a través del protocolo MCP:
+Local Brain exposes 11 standard MCP tools over `stdio`:
 
-1. **`brain_remember`**: Registra recuerdos con metadatos completos y especialización cognitiva.
-2. **`brain_recall`**: Recuperación rápida mediante similitud de vectores o filtros simples.
-3. **`brain_search`**: Búsqueda avanzada multicriterio con filtros de fecha (ISO 8601) e importancia.
-4. **`brain_retrieve`**: Recuperación híbrida avanzada (Vectores + FTS + Grafo) con decaimiento y explicabilidad.
-5. **`brain_relate`**: Vincula nodos en el Grafo de Conocimiento con 10 relaciones tipadas y DAG sin ciclos.
-6. **`brain_graph`**: Recorre y explora vecindades recursivas en el grafo de conocimiento.
-7. **`brain_learn`**: Registra observaciones empíricas vs creencias candidatas con fuentes de evidencia.
-8. **`brain_explain`**: Desglosa por qué el sistema cree una afirmación, evaluando historial y consistencia.
-9. **`brain_consolidate`**: Ejecuta reflexión asíncrona sobre experiencias recientes.
-10. **`brain_forget`**: Eliminación lógica (*soft-delete*) segura con confirmación explícita (`confirm: true`).
-11. **`brain_session_end`**: Cierra la sesión activa y expira los recuerdos transitorios de trabajo.
+1. **`brain_remember`**: Store memories with rich metadata and cognitive specialization.
+2. **`brain_recall`**: Rapid retrieval via vector similarity or attribute filters.
+3. **`brain_search`**: Multi-criteria search with date ranges (ISO 8601) and importance filters.
+4. **`brain_retrieve`**: Full hybrid retrieval (Vector + FTS + Graph) with decay scoring and explainability.
+5. **`brain_relate`**: Link entities in the Knowledge Graph with 10 typed relations and cycle-safe DAGs.
+6. **`brain_graph`**: Traverse and explore multi-hop graph neighborhoods.
+7. **`brain_learn`**: Record observations vs. candidate beliefs with evidence sources.
+8. **`brain_explain`**: Unpack why the system believes a statement with evidence history.
+9. **`brain_consolidate`**: Trigger asynchronous reflection and hypothesis synthesis.
+10. **`brain_forget`**: Safe logical soft-delete requiring explicit confirmation (`confirm: true`).
+11. **`brain_session_end`**: Conclude an active session and expire transient working memories.
 
 ---
 
-## 📦 Skill Oficial para Agentes (`local-brain`)
+## 📦 Official Agent Skill (`local-brain`)
 
-Para que tus agentes de IA aprovechen automáticamente las mejores prácticas de Local Brain sin que tengas que guiarlos en cada prompt, el repositorio incluye una **Skill Oficial**:
+To help autonomous AI agents use Local Brain without prompt overhead, this repository includes an **Official Agent Skill**:
 
-- Manifiesto: [`.agents/skills/local-brain/SKILL.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/SKILL.md)
-- Catálogo de herramientas: [`mcp-tools.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/mcp-tools.md)
-- Guía de tipos cognitivos: [`memory-types.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/memory-types.md)
-- Patrones de flujo agéntico: [`workflow-patterns.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/workflow-patterns.md)
+- Main Playbook: [`.agents/skills/local-brain/SKILL.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/SKILL.md)
+- Tools Catalog: [`mcp-tools.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/mcp-tools.md)
+- Cognitive Types Guide: [`memory-types.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/memory-types.md)
+- Interaction Patterns: [`workflow-patterns.md`](file:///home/guty_3rrez/Proyectos/local-brain/.agents/skills/local-brain/references/workflow-patterns.md)
 
-Para instalarla en tu entorno global:
+To install globally for Antigravity or other agent runtimes:
 ```bash
 mkdir -p ~/.agents/skills/local-brain
 cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
@@ -275,42 +277,42 @@ cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
 
 ---
 
-## 🏛️ Arquitectura del Sistema
+## 🏛️ System Architecture
 
-Local Brain está estructurado bajo los principios de **Clean Architecture / Arquitectura Hexagonal**, desacoplando totalmente la lógica cognitiva de cualquier infraestructura física:
+Built following strict **Clean Architecture / Hexagonal Architecture** principles:
 
 ```mermaid
 flowchart TD
-    subgraph Clients["Agentes & Interfaces"]
+    subgraph Clients["Agents & Interfaces"]
         CC["Claude Code"]
         CU["Cursor / Windsurf"]
         AG["Antigravity / Codex"]
         CLI["brain CLI (clap)"]
     end
 
-    subgraph Entrypoints["Adaptadores Primarios (Entrada)"]
+    subgraph Entrypoints["Primary Adapters (Inbound)"]
         MCP["brain-mcp (MCP Server stdio)"]
-        CMD["brain-cli (Comandos y flags)"]
+        CMD["brain-cli (Commands & Flags)"]
     end
 
-    subgraph Application["Capa de Aplicación (brain-application)"]
-        UC["Casos de Uso (Remember, Recall, Retrieve, Relate, Learn, Reflect)"]
+    subgraph Application["Application Layer (brain-application)"]
+        UC["Use Cases (Remember, Recall, Retrieve, Relate, Learn, Reflect)"]
     end
 
-    subgraph Domain["Capa de Dominio Puro (brain-domain)"]
-        DOM["Entidades Invariantes, Tipos Cognitivos, Fórmulas de Scoring, Traits"]
+    subgraph Domain["Pure Domain Layer (brain-domain)"]
+        DOM["Invariant Entities, Cognitive Types, Scoring Formulas, Traits"]
     end
 
-    subgraph SpecializedCrates["Módulos Especializados"]
-        GRA["brain-graph (Grafo y DAG)"]
-        LEA["brain-learning (Evidencias y Confianza)"]
-        CON["brain-consolidation (Reflexión y Conflictos)"]
-        RET["brain-retrieval (FTS + Vector + Grafo + Decaimiento)"]
+    subgraph SpecializedCrates["Specialized Engines"]
+        GRA["brain-graph (Graph & DAG)"]
+        LEA["brain-learning (Evidence & Confidence)"]
+        CON["brain-consolidation (Reflection & Conflicts)"]
+        RET["brain-retrieval (FTS + Vector + Graph + Decay)"]
     end
 
-    subgraph Infrastructure["Adaptadores Secundarios (brain-infrastructure)"]
+    subgraph Infrastructure["Secondary Adapters (brain-infrastructure)"]
         PG[("PostgreSQL 17 + pgvector (SQLx)")]
-        LLM["llama.cpp (Inferencia Local 768d)"]
+        LLM["llama.cpp (Local 768d Inference)"]
     end
 
     Clients --> Entrypoints
@@ -318,61 +320,61 @@ flowchart TD
     Application --> Domain
     Application --> SpecializedCrates
     SpecializedCrates --> Domain
-    Infrastructure -.->|Implementa puertos| Domain
+    Infrastructure -.->|Implements ports| Domain
 ```
 
-- **Dominio Puro**: `brain-domain` compila en milisegundos y tiene **cero dependencias** de bases de datos, redes, GPU o frameworks externos.
+- **Pure Domain**: `brain-domain` compiles in milliseconds with **zero dependencies** on databases, network, GPU, or external frameworks.
 
 ---
 
-## 💻 Hardware de Referencia y Rendimiento
+## 💻 Hardware Requirements & Benchmarks
 
-Local Brain fue probado y optimizado para ejecutarse con latencias mínimas en hardware de consumo común:
+Local Brain is optimized to deliver sub-millisecond core logic latencies on commodity consumer hardware:
 
-| Componente | Especificación de Referencia |
+| Component | Reference Benchmark Spec |
 | :--- | :--- |
-| **Procesador (CPU)** | AMD Ryzen 7 6800H (8 núcleos, 16 hilos) o equivalente x86_64 / ARM64 |
-| **Memoria RAM** | 16 GB DDR4/DDR5 |
-| **GPU / VRAM** | NVIDIA GeForce RTX 3050 Laptop (4 GB VRAM) o CPU pura |
-| **Almacenamiento** | SSD NVMe |
-| **Modelo de Embeddings** | `nomic-embed-text-v1.5` Q8_0 (768 dimensiones, ~140 MB) |
+| **CPU** | AMD Ryzen 7 6800H (8 cores, 16 threads) or equivalent x86_64 / ARM64 |
+| **RAM** | 16 GB DDR4/DDR5 |
+| **GPU / VRAM** | NVIDIA GeForce RTX 3050 Laptop (4 GB VRAM) or pure CPU |
+| **Storage** | NVMe SSD |
+| **Embedding Model** | `nomic-embed-text-v1.5` Q8_0 (768 dimensions, ~140 MB) |
 
-### Métricas de Latencia Observadas
-- **Validación e Invariantes de Dominio**: `< 3 µs`
-- **Similitud Coseno pura en memoria**: `< 1 µs`
-- **Scoring Multidimensional con Decaimiento**: `< 500 ns`
-- **Navegación de Grafo (3 saltos)**: `< 100 µs`
-- **Búsqueda Vectorial HNSW en PostgreSQL**: `< 5 ms`
-- **Pipeline Híbrido End-to-End**: `< 40 ms`
-
----
-
-## 🛡️ Privacidad y Seguridad Local-First
-
-- **100% Offline**: Local Brain bloquea por diseño cualquier conexión saliente externa (`--offline`).
-- **Cero Telemetría**: Ningún dato de tus proyectos ni registros de memoria salen de tu máquina.
-- **Protección Anti-Prompt Injection**: Todo contenido recuperado de la memoria se encapsula bajo etiquetas delimitadoras de datos no confiables (`<untrusted_memory_content>`), previniendo que recuerdos históricos puedan secuestrar las instrucciones de tu agente.
-- **Soft-Delete Seguro**: Los recuerdos eliminados se marcan lógicamente y requieren confirmación explícita para evitar pérdidas accidentales.
-- **Respaldos Portables**: Exportación completa a formatos abiertos JSONL o SQL con validación de sumas SHA-256.
+### Observed Latencies
+- **Domain Invariant Validation & SHA-256**: `< 3 µs`
+- **In-Memory Cosine Similarity**: `< 1 µs`
+- **Multidimensional Scoring with Decay**: `< 500 ns`
+- **Graph Neighborhood Traversal (3 hops)**: `< 100 µs`
+- **PostgreSQL HNSW Vector Search**: `< 5 ms`
+- **End-to-End Hybrid Retrieval Pipeline**: `< 40 ms`
 
 ---
 
-## 🤝 Cómo Colaborar
+## 🛡️ Privacy & Local-First Security
 
-Agradecemos enormemente las contribuciones de la comunidad (tanto de desarrolladores humanos como de agentes de IA):
-
-1. **Revisa las Normas**:
-   - Para desarrolladores: [`CONTRIBUTING.md`](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.md).
-   - Para agentes de IA: [`AGENTS.md`](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md).
-   - Para Claude Code: [`CLAUDE.md`](file:///home/guty_3rrez/Proyectos/local-brain/CLAUDE.md).
-2. **Explora Tareas**: Revisa los [GitHub Issues y Milestones](https://github.com/local-brain/local-brain/issues).
-3. **Decisiones de Diseño**: Consulta las decisiones registradas en [`docs/adr/`](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr).
+- **100% Offline by Design**: Local Brain rejects outbound external internet connections (`--offline`).
+- **Zero Telemetry**: No project details or memory content ever leave your machine.
+- **Prompt Injection Defense**: Retrieved memories are wrapped in strict untrusted data boundaries (`<untrusted_memory_content>`), preventing malicious historical text from hijacking agent instructions.
+- **Safe Soft Deletes**: Memories are marked logically and require explicit confirmation (`confirm: true`) to delete.
+- **Cryptographic Portability**: Export your entire brain to open JSONL or SQL backups with SHA-256 verification.
 
 ---
 
-## 📄 Licencia
+## 🤝 Contributing
 
-Este proyecto está licenciado bajo la **GNU Affero General Public License v3.0 (AGPL-3.0-or-later)**.
+We warmly welcome contributions from human engineers and autonomous AI agents:
+
+1. **Review the Guidelines**:
+   - For human developers: [`CONTRIBUTING.md`](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.md) ([Español](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.es.md)).
+   - For AI agents: [`AGENTS.md`](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md) ([Español](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.es.md)).
+   - For Claude Code: [`CLAUDE.md`](file:///home/guty_3rrez/Proyectos/local-brain/CLAUDE.md).
+2. **Explore Open Issues**: Check [GitHub Issues & Milestones](https://github.com/local-brain/local-brain/issues).
+3. **Architecture Decision Records**: Read technical rationale in [`docs/adr/`](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr/).
+
+---
+
+## 📄 License
+
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0-or-later)**.
 
 > [!NOTE]
-> La licencia AGPLv3 es una licencia de **copyleft fuerte**. Garantiza que Local Brain y cualquier mejora o derivación continúen siendo **siempre software libre y de código abierto**. Consulta el archivo [`LICENSE`](file:///home/guty_3rrez/Proyectos/local-brain/LICENSE) para los términos completos.
+> AGPLv3 is a **strong copyleft** license ensuring that Local Brain and any derivative works or network-hosted integrations remain **permanently free and open-source software**. See [`LICENSE`](file:///home/guty_3rrez/Proyectos/local-brain/LICENSE) for complete terms.

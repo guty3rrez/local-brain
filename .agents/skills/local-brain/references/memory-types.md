@@ -1,67 +1,67 @@
-# Tipos de Memoria Cognitiva — Local Brain
+# Cognitive Memory Types — Local Brain
 
-Local Brain rechaza el enfoque ingenuo de tratar toda memoria como texto plano o documentos indiferenciados. El sistema modela **cinco tipos cognitivos especializados**, cada uno con su propio ciclo de vida, reglas de decaimiento y validaciones invariantes de dominio.
+Local Brain rejects the naive approach of treating all memory as flat unstructured text. The system models **five specialized cognitive types**, each with distinct lifecycles, decay models, and pure domain invariants.
 
 ---
 
-## 🧠 Matriz Comparativa
+## 🧠 Comparison Matrix
 
-| Tipo de Memoria | Naturaleza | Persistencia | Estructura Clave | Caso de Uso Típico |
+| Memory Type | Nature | Persistence | Key Structure | Typical Use Case |
 | :--- | :--- | :--- | :--- | :--- |
-| **`working`** | Estado de sesión activo | Efímera (TTL) | `session_id`, `ttl_seconds`, `goal` | Contexto temporal de la tarea actual, variables transitorias. |
-| **`episodic`** | Experiencias situacionales | Permanente | `context`, `action`, `outcome` | Qué intentamos, qué hicimos y qué ocurrió (éxitos o fallos). |
-| **`semantic`** | Hechos y directrices | Permanente | `statement`, `confidence`, `evidence_ids` | Reglas arquitectónicas, preferencias y conocimientos validados. |
-| **`procedural`** | Pasos técnicos ordenados | Permanente | `goal`, `steps: [step_number, cmd, action]` | Guías operativas, secuencias de despliegue o compilación. |
-| **`associative`** | Conexiones ontológicas | Permanente | `source_concept`, `target_concept`, `predicate`, `strength` | Relaciones conceptuales directas entre entidades o tecnologías. |
+| **`working`** | Active session state | Ephemeral (TTL) | `session_id`, `ttl_seconds`, `goal` | Immediate context of active task, transient scratch variables. |
+| **`episodic`** | Situated experiences | Permanent | `context`, `action`, `outcome` | What was attempted, what was done, and what happened. |
+| **`semantic`** | Facts & guidelines | Permanent | `statement`, `confidence`, `evidence_ids` | Architectural conventions, validated preferences, core rules. |
+| **`procedural`** | Ordered technical steps | Permanent | `goal`, `steps: [step_number, cmd, action]` | Operational runbooks, compilation sequences, deployment steps. |
+| **`associative`** | Ontological connections | Permanent | `source_concept`, `target_concept`, `predicate`, `strength` | Direct concept-to-concept triples linking technologies and patterns. |
 
 ---
 
-## 1. Memoria de Trabajo (`working`)
-- **Propósito**: Mantener el contexto inmediato de una sesión de trabajo sin contaminar la memoria a largo plazo.
-- **Invariantes**:
-  - Requiere `session_id` no vacío.
-  - Expira automáticamente al superarse su `ttl_seconds` o al cerrarse la sesión con `brain_session_end`.
-  - No genera decaimiento temporal gradual: se purga o archiva al vencer su tiempo de vida.
+## 1. Working Memory (`working`)
+- **Purpose**: Maintain immediate scratchpad state without polluting long-term memory.
+- **Invariants**:
+  - Requires non-empty `session_id`.
+  - Automatically expires after `ttl_seconds` or when `brain_session_end` is invoked.
+  - Does not undergo gradual recency decay; it is cleanly archived or purged.
 
 ---
 
-## 2. Memoria Episódica (`episodic`)
-- **Propósito**: Capturar la experiencia empírica vivencial de los agentes a lo largo del tiempo.
-- **Invariantes**:
-  - Se estructura bajo la tríada estricta:
-    - **Contexto (`context`)**: La situación o problema que motivó la acción.
-    - **Acción (`action`)**: La decisión técnica o comando ejecutado.
-    - **Resultado (`outcome`)**: Lo que realmente ocurrió (logs de error, latencia, resultado funcional).
-  - Admite importancia intrínseca (`importance` $\in [0.0, 1.0]$).
-  - Es el insumo primario que el motor de **reflexión y consolidación** analiza para derivar nuevas hipótesis y creencias semánticas.
+## 2. Episodic Memory (`episodic`)
+- **Purpose**: Capture empirical trial-and-error experiences of agents over time.
+- **Invariants**:
+  - Structured under the strict triad:
+    - **Context (`context`)**: Situation or problem motivating the action.
+    - **Action (`action`)**: Technical command or decision executed.
+    - **Outcome (`outcome`)**: Empirical consequence (error traces, benchmark latencies, success).
+  - Supports intrinsic importance (`importance` $\in [0.0, 1.0]$).
+  - Primary input for offline **reflection and consolidation**, where repetitive episodes yield generalized semantic beliefs.
 
 ---
 
-## 3. Memoria Semántica (`semantic`)
-- **Propósito**: Almacenar afirmaciones, principios, directrices de diseño y hechos generalizados.
-- **Invariantes**:
-  - Contiene un `statement` no vacío.
-  - Posee un grado de certidumbre empírica (`confidence` $\in [0.0, 1.0]$).
-  - **Invariante de Evidencia Rigurosa**: Si `confidence >= 0.8`, la memoria **exige obligatoriamente** tener al menos un UUID en `evidence_ids` que respalde empíricamente la afirmación. Ningún agente puede declarar una verdad absoluta sin pruebas.
+## 3. Semantic Memory (`semantic`)
+- **Purpose**: Store architectural principles, design guidelines, and verified facts.
+- **Invariants**:
+  - Contains a non-empty `statement`.
+  - Measures empirical confidence (`confidence` $\in [0.0, 1.0]$).
+  - **Strict Evidence Invariant**: If `confidence >= 0.8`, the memory **mandates** at least one supporting evidence UUID in `evidence_ids`. Agents cannot assert absolute truths without empirical backing.
 
 ---
 
-## 4. Memoria Procedimental (`procedural`)
-- **Propósito**: Codificar secuencias operativas paso a paso para resolver problemas conocidos.
-- **Invariantes**:
-  - Define una meta técnica (`goal`) y un nombre identificador.
-  - Contiene una lista ordenada de pasos (`steps`), donde cada paso tiene:
-    - `step_number`: Número ordinal positivo (1, 2, 3...).
-    - `description`: Qué hace el paso.
-    - `command` *(opcional)*: El comando de terminal asociado.
-    - `action_type` *(opcional)*: Clasificación de la acción.
-  - Los números de paso deben ser estrictamente secuenciales y sin huecos.
+## 4. Procedural Memory (`procedural`)
+- **Purpose**: Encode step-by-step technical execution recipes.
+- **Invariants**:
+  - Defines a technical goal (`goal`) and title.
+  - Contains an ordered list of `steps`, each with:
+    - `step_number`: Positive ordinal integer (1, 2, 3...).
+    - `description`: Action description.
+    - `command` *(optional)*: Shell or CLI command.
+    - `action_type` *(optional)*: Action category.
+  - Step numbers must be strictly sequential with zero gaps.
 
 ---
 
-## 5. Memoria Asociativa (`associative`)
-- **Propósito**: Establecer triplas conceptuales semánticas rápidas entre entidades de conocimiento.
-- **Invariantes**:
-  - Tripla canónica: `source_concept` → `predicate` → `target_concept`.
-  - Peso asociativo normalizado (`strength` $\in [0.0, 1.0]$).
-  - `source_concept` y `target_concept` no pueden ser idénticos (prohibición estricta de auto-asociaciones vacías).
+## 5. Associative Memory (`associative`)
+- **Purpose**: Establish semantic concept triples between entities.
+- **Invariants**:
+  - Canonical triple: `source_concept` → `predicate` → `target_concept`.
+  - Normalized associative strength (`strength` $\in [0.0, 1.0]$).
+  - `source_concept` and `target_concept` cannot be identical (self-loops are prohibited).

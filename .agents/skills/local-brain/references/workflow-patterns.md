@@ -1,18 +1,18 @@
-# Patrones de Flujo de Trabajo Agéntico — Local Brain
+# Agent Workflow Patterns — Local Brain
 
-Patrones de interacción recomendados para agentes de IA que integran memoria persistente en sus tareas cotidianas.
+Recommended interaction patterns for autonomous AI agents integrating persistent cognitive memory.
 
 ---
 
-## Patrón 1: Inicialización de Sesión e Ingesta de Contexto
-Al comenzar a trabajar en un repositorio o feature, el agente consulta la memoria histórica acumulada para no repetir errores pasados ni violar convenciones preestablecidas.
+## Pattern 1: Session Start & Context Ingestion
+Upon starting work in a repository or feature, query historical knowledge to avoid repeating past mistakes or violating conventions.
 
 ```json
-// Paso 1: Recuperación híbrida del proyecto actual
+// Step 1: Hybrid retrieval for project conventions
 {
   "name": "brain_retrieve",
   "arguments": {
-    "query": "convenciones arquitectónicas y problemas resueltos recientemente",
+    "query": "architectural conventions decisions and troubleshooting patterns",
     "project": "local-brain",
     "limit": 5,
     "min_score": 0.4
@@ -20,9 +20,9 @@ Al comenzar a trabajar en un repositorio o feature, el agente consulta la memori
 }
 ```
 
-Si se identifican tecnologías clave en el contexto recuperado, el agente puede inspeccionar el grafo para ver directivas de preferencia:
+If key technologies appear in retrieved memories, inspect the Knowledge Graph for explicit preference rules:
 ```json
-// Paso 2: Consultar relaciones asociadas a una tecnología
+// Step 2: Query relationships for a specific technology
 {
   "name": "brain_graph",
   "arguments": {
@@ -35,8 +35,8 @@ Si se identifican tecnologías clave en el contexto recuperado, el agente puede 
 
 ---
 
-## Patrón 2: Registro de Solución a un Problema Técnico (Memoria Episódica)
-Cuando el agente investiga un error complejo, prueba varias alternativas y finalmente da con la solución correcta, debe registrar la experiencia situacional para que otros agentes (o él mismo en futuras sesiones) la aprovechen:
+## Pattern 2: Logging a Technical Solution (Episodic Memory)
+When resolving an intricate bug or discovering a non-trivial fix, record the episodic experience so that other agents (or yourself in future sessions) can benefit:
 
 ```json
 {
@@ -47,14 +47,14 @@ Cuando el agente investiga un error complejo, prueba varias alternativas y final
     "memory_type": "episodic",
     "importance": 0.85,
     "confidence": 0.90,
-    "context": "Fallo en CI al ejecutar cargo test en contenedor alpine por símbolos ausentes de glibc",
-    "action": "Migramos el target de compilación a x86_64-unknown-linux-musl e instalamos musl-tools en el runner",
-    "outcome": "El binario compiló de forma completamente estática sin dependencias dinámicas, pasando todos los tests de CI"
+    "context": "CI compilation failed in minimal Alpine container due to missing glibc symbols",
+    "action": "Migrated build target to x86_64-unknown-linux-musl and installed musl-tools on the runner",
+    "outcome": "Binary compiled completely static with zero dynamic runtime dependencies, passing all CI checks"
   }
 }
 ```
 
-Adicionalmente, se conecta el problema y la solución en el Grafo de Conocimiento:
+Link the resolution explicitly in the Knowledge Graph:
 ```json
 {
   "name": "brain_relate",
@@ -63,23 +63,22 @@ Adicionalmente, se conecta el problema y la solución en el Grafo de Conocimient
     "target": "Alpine-Linux-CI",
     "relation": "SOLVES",
     "weight": 0.95,
-    "context": "Resuelve la incompatibilidad de símbolos glibc en entornos Alpine minimalistas"
+    "context": "Resolves glibc dynamic symbol incompatibility on minimal Alpine environments"
   }
 }
 ```
 
 ---
 
-## Patrón 3: Ciclo de Aprendizaje Empírico (Observación vs Creencia)
-Cuando el agente descubre un comportamiento que aún no es una verdad universal, lo registra como observación empírica o creencia candidata con nivel de confianza moderado:
+## Pattern 3: Empirical Learning Cycle (Observation vs. Belief)
+When discovering a performance pattern that is not yet an established ground truth, log it as an empirical observation with moderate confidence:
 
 ```json
-// Registrar observación empírica con evidencia
 {
   "name": "brain_learn",
   "arguments": {
-    "statement": "El índice HNSW con m=16 y ef_construction=64 reduce el uso de memoria en un 35% sin degradar el recall en benchmarks locales",
-    "evidence": "Ejecución de benchmark con 50.000 vectores sintéticos en hardware Ryzen 7",
+    "statement": "HNSW indexing with m=16 and ef_construction=64 decreases RAM usage by 35% without degrading recall in local benchmarks",
+    "evidence": "Benchmark execution with 50,000 synthetic vectors on AMD Ryzen 7 hardware",
     "source_type": "tool_execution",
     "domain": "vector-search",
     "agent": "antigravity",
@@ -88,12 +87,12 @@ Cuando el agente descubre un comportamiento que aún no es una verdad universal,
 }
 ```
 
-Posteriormente, cuando un usuario o agente necesite entender el origen de una directriz técnica:
+Later, when asking why a specific configuration was chosen:
 ```json
 {
   "name": "brain_explain",
   "arguments": {
-    "query": "¿Por qué usamos m=16 en HNSW?",
+    "query": "Why do we use m=16 in HNSW?",
     "domain": "vector-search"
   }
 }
@@ -101,8 +100,8 @@ Posteriormente, cuando un usuario o agente necesite entender el origen de una di
 
 ---
 
-## Patrón 4: Registro de un Procedimiento Operativo Técnico
-Para tareas recurrentes de compilación, despliegue o pruebas:
+## Pattern 4: Registering an Operational Procedure
+For recurring build, test, or deployment recipes:
 
 ```json
 {
@@ -110,22 +109,22 @@ Para tareas recurrentes de compilación, despliegue o pruebas:
   "arguments": {
     "project": "local-brain",
     "memory_type": "procedural",
-    "content": "Protocolo de verificación previa a PR",
-    "goal": "Garantizar cero fallos de linter, formato y tests antes de someter cambios",
+    "content": "Pre-PR local verification protocol",
+    "goal": "Guarantee zero linter, format, and test regressions prior to submitting changes",
     "steps": [
       {
         "step_number": 1,
-        "description": "Verificar formateo oficial de Rust",
+        "description": "Verify official Rust formatting",
         "command": "cargo fmt --all -- --check"
       },
       {
         "step_number": 2,
-        "description": "Ejecutar linter con advertencias tratadas como errores",
+        "description": "Execute static analysis with zero warnings permitted",
         "command": "cargo clippy --workspace --all-targets -- -D warnings"
       },
       {
         "step_number": 3,
-        "description": "Ejecutar suite de tests unitarios puros de dominio",
+        "description": "Run pure domain unit tests",
         "command": "cargo test --workspace --lib"
       }
     ]
@@ -135,22 +134,22 @@ Para tareas recurrentes de compilación, despliegue o pruebas:
 
 ---
 
-## Patrón 5: Manejo de Sesión Efímera (Working Memory)
-Para tareas en curso que duran múltiples turnos pero no deben persistir indefinidamente:
+## Pattern 5: Managing Ephemeral Session State (Working Memory)
+For ongoing multi-turn tasks that should not pollute long-term history:
 
 ```json
-// Paso 1: Registrar memoria de trabajo con TTL (30 minutos = 1800s)
+// Step 1: Store working memory with TTL (30 minutes = 1800s)
 {
   "name": "brain_remember",
   "arguments": {
     "memory_type": "working",
     "session_id": "session-refactor-retrieval-42",
-    "content": "Refactorizando scoring de decaimiento: analizando impacto en tests de pipeline",
+    "content": "Refactoring decay scoring: analyzing impact on pipeline integration tests",
     "ttl_seconds": 1800
   }
 }
 
-// Paso 2: Al concluir la sesión de trabajo
+// Step 2: Clean up at session end
 {
   "name": "brain_session_end",
   "arguments": {

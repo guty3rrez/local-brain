@@ -1,78 +1,80 @@
-# ⚡ Guía de Inicio Rápido (Quickstart) — Local Brain v1.0
+# ⚡ Quickstart Guide — Local Brain v1.0
 
-> **Empieza a darle memoria cognitiva persistente a tus agentes de IA en menos de 3 minutos.**
+> **Equip your AI agents with cognitive persistent memory in less than 3 minutes.**
 
----
-
-## 🎯 ¿Qué vas a lograr?
-Al terminar esta guía, tendrás:
-1. **Infraestructura local lista**: PostgreSQL 17 con `pgvector` y el servidor de embeddings `llama.cpp` corriendo 100% offline en tu máquina.
-2. **CLI `brain` operativa**: Inicializada con esquemas relacionales, índices HNSW de 768 dimensiones y diagnóstico de salud verificado.
-3. **Agentes conectados vía MCP**: Claude Code, Cursor, Claude Desktop o Antigravity compartiendo recuerdos, aprendizajes y relaciones de grafo.
+🌐 **English** | [Español](QUICKSTART.es.md)
 
 ---
 
-## 📋 Prerrequisitos Mínimos
-
-- **Docker y Docker Compose** (v2+)
-- **Sistema Operativo**: Linux (Ubuntu, Debian, Fedora, Arch, etc.), macOS (Intel o Apple Silicon), o Windows (vía WSL2).
-- **Recursos recomendados**: 4 GB de RAM disponibles y ~2 GB de espacio en disco (para PostgreSQL + pgvector y el modelo nomic-embed-text).
+## 🎯 What Will You Achieve?
+By the end of this guide, you will have:
+1. **Local infrastructure running**: PostgreSQL 17 with `pgvector` and the `llama.cpp` embedding runtime operating 100% offline on your machine.
+2. **Operational `brain` CLI**: Initialized with relational schemas, 768-dimensional HNSW indexes, and passing health diagnostics.
+3. **AI agents connected via MCP**: Claude Code, Cursor, Claude Desktop, Antigravity, or Cline sharing memories, learnings, and knowledge graph relations.
 
 ---
 
-## 🚀 Método 1: Asistente Automatizado (Recomendado)
+## 📋 Minimum Prerequisites
 
-Ejecuta el asistente interactivo en la raíz del repositorio:
+- **Docker and Docker Compose** (v2+)
+- **Operating System**: Linux (Ubuntu, Debian, Fedora, Arch), macOS (Apple Silicon or Intel), or Windows 10/11 (with WSL2).
+- **Recommended Hardware**: 4 GB available RAM and ~2 GB disk space (for PostgreSQL, pgvector, and the `nomic-embed-text` model).
+
+---
+
+## 🚀 Method 1: Automated Onboarding Wizard (Recommended)
+
+Run the interactive setup assistant from the root of the repository:
 
 ```bash
 ./scripts/quickstart.sh
 ```
 
-El script se encargará automáticamente de:
-1. Descargar el modelo de embeddings GGUF cuantizado (~140 MB).
-2. Levantar los contenedores de Docker en segundo plano.
-3. Esperar que PostgreSQL y llama.cpp estén saludables.
-4. Aplicar las migraciones de base de datos (`brain init`).
-5. Ejecutar un diagnóstico de salud del sistema (`brain doctor`).
-6. Imprimir los bloques de configuración MCP listos para tu cliente favorito.
+The script automatically:
+1. Downloads the quantized GGUF embedding model (~140 MB).
+2. Starts the Docker containers in the background.
+3. Waits for PostgreSQL and llama.cpp to report healthy status.
+4. Applies database migrations (`brain init`).
+5. Executes a full system health diagnostic (`brain doctor`).
+6. Prints copy-pasteable MCP configuration blocks for your AI tools.
 
 ---
 
-## 🛠️ Método 2: Paso a Paso Manual
+## 🛠️ Method 2: Manual Step-by-Step
 
-### Paso 1: Descargar el Binario de Local Brain
-Descarga el binario precompilado para tu plataforma desde [GitHub Releases](https://github.com/local-brain/local-brain/releases):
+### Step 1: Download the Pre-built Binary
+Download the binary for your platform from [GitHub Releases](https://github.com/local-brain/local-brain/releases):
 
 ```bash
-# Ejemplo para Linux x86_64:
+# Example for Linux x86_64:
 curl -sL https://github.com/local-brain/local-brain/releases/latest/download/brain-linux-x86_64.tar.gz | tar xz
 sudo install -m 755 brain /usr/local/bin/brain
 ```
 
-*O compila directamente con Rust si tienes Cargo instalado:*
+*Or build directly from source using Cargo:*
 ```bash
 cargo build --release --bin brain
 sudo install -m 755 target/release/brain /usr/local/bin/brain
 ```
 
-### Paso 2: Levantar los Servicios Locales
-En la raíz del proyecto:
+### Step 2: Start Local Services
+From the repository root:
 ```bash
 docker compose up -d
 ```
-Verifica que los servicios estén corriendo:
+Verify the services are running:
 ```bash
 docker compose ps
 ```
-- `local-brain-postgres` en puerto `5433`
-- `local-brain-embeddings` en puerto `8081`
+- `local-brain-postgres` on port `5433`
+- `local-brain-embeddings` on port `8081`
 
-### Paso 3: Inicializar la Persistencia
-Ejecuta las migraciones de base de datos:
+### Step 3: Initialize the Database
+Run migrations:
 ```bash
 brain init
 ```
-Salida esperada:
+Expected output:
 ```text
 🧠 Inicializando Local Brain...
 ✅ Base de datos inicializada exitosamente.
@@ -81,28 +83,39 @@ Salida esperada:
 🚀 Local Brain está listo para operar con búsqueda semántica.
 ```
 
-### Paso 4: Diagnóstico de Salud
-Verifica que todo el stack esté al 100%:
+### Step 4: Health Diagnostics
+Verify that your entire stack is operational:
 ```bash
 brain doctor
 ```
 ```text
-🩺 Diagnóstico de Salud de Local Brain:
-  [OK] Conexión a PostgreSQL 17
-  [OK] Extensión pgvector activa
-  [OK] Runtime de embeddings llama.cpp (768 dimensiones)
-  [OK] Modo offline estrictamente local
-✨ Estado general: ÓPTIMO (Todos los componentes operativos).
+🧠 Local Brain Doctor — System Health Diagnostic
+   Core: v1.0.0 | OS: linux
+----------------------------------------------------------------------
+ 🟢 [System       ] Local Brain Version           Core v1.0.0 on platform linux
+ 🟢 [Configuration] brain.toml file               Loaded and validated successfully
+ 🟢 [Security     ] Offline Mode                  Standard local-first policy active
+ 🟢 [Persistence  ] PostgreSQL Connectivity       Connected (PostgreSQL 17.11 pgvector)
+ 🟢 [Persistence  ] Table Schemas                 All 7 cognitive tables migrated
+ 🟢 [Search       ] Full-Text Search (FTS)        tsvector column 'tsv' and GIN index active
+ 🟢 [Vectors      ] pgvector Extension            Installed v0.8.6 (cosine distance OK)
+ 🟢 [Embeddings   ] llama.cpp Runtime             Online (dimension: 768d nomic-embed-text)
+ 🟢 [Queues       ] Pending Embeddings            All memories vectorized and indexed
+ 🟢 [Queues       ] Working Memory TTL            No expired working memories pending
+ 🟢 [Knowledge    ] Conflicts & Contradictions    No unresolved cognitive contradictions
+----------------------------------------------------------------------
+   Summary: 11 OK | 0 Warnings | 0 Critical Failures
+   Overall Status: 🟢 HEALTHY AND OPERATIONAL
 ```
 
 ---
 
-## 🤖 Conectar tus Agentes de IA vía MCP
+## 🤖 Connect Your AI Agents via MCP
 
-Local Brain implementa el protocolo abierto **Model Context Protocol (MCP)** sobre `stdio`. Elige tu entorno y añade la configuración correspondiente:
+Local Brain implements the **Model Context Protocol (MCP)** over `stdio`. Select your client below:
 
 ### 1. Claude Desktop
-Edita tu archivo `claude_desktop_config.json`:
+Edit your `claude_desktop_config.json`:
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -123,14 +136,13 @@ Edita tu archivo `claude_desktop_config.json`:
 ```
 
 ### 2. Claude Code CLI
-Añade Local Brain en un solo comando:
+Add the server with a single command:
 ```bash
 claude mcp add local-brain brain -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
 ```
 
 ### 3. Cursor & Windsurf
-Crea o edita `.cursor/mcp.json` en la raíz de tu proyecto (o la configuración global de MCP en Cursor/Windsurf Settings):
-
+Add to `.cursor/mcp.json` or your MCP Settings:
 ```json
 {
   "mcpServers": {
@@ -147,7 +159,7 @@ Crea o edita `.cursor/mcp.json` en la raíz de tu proyecto (o la configuración 
 ```
 
 ### 4. Cline / Roo Code (VS Code Extension)
-En `cline_mcp_settings.json`:
+In `cline_mcp_settings.json`:
 ```json
 {
   "mcpServers": {
@@ -163,7 +175,6 @@ En `cline_mcp_settings.json`:
         "brain_remember",
         "brain_recall",
         "brain_retrieve",
-        "brain_search",
         "brain_relate",
         "brain_graph",
         "brain_learn",
@@ -176,55 +187,52 @@ En `cline_mcp_settings.json`:
 
 ---
 
-## 🧪 Comprobación Rápida desde la Terminal
+## 🧪 Terminal Quick Test
 
-Puedes interactuar con tu cerebro directamente desde la CLI:
+Test your memory layer directly from the CLI:
 
-### 1. Guardar una decisión o aprendizaje técnico
+### 1. Store a decision or convention
 ```bash
 brain remember \
-  "En el módulo de autenticación usamos tokens PASETO v4 en lugar de JWT para evitar ataques de algoritmo 'none'" \
+  "In this backend service we use PASETO v4 tokens instead of JWT to mitigate algorithm 'none' vulnerabilities" \
   --type semantic \
-  --project mi-backend \
+  --project my-backend \
   --confidence 0.95
 ```
 
-### 2. Recuperar por significado semántico
+### 2. Semantic recall by meaning
 ```bash
-brain recall -q "¿qué formato de tokens de autenticación usamos?" --project mi-backend
+brain recall -q "what token format do we use for authentication?" --project my-backend
 ```
 
-### 3. Recuperación híbrida avanzada con desglose de scoring
+### 3. Advanced hybrid retrieval with scoring breakdown
 ```bash
-brain retrieve "seguridad en autenticación" --project mi-backend --explain
+brain retrieve "authentication token security" --project my-backend --explain
 ```
 
-### 4. Conectar conceptos en el Grafo de Conocimiento
+### 4. Link concepts in the Knowledge Graph
 ```bash
-brain relate PASETO JWT --type PREFERS --context "Mayor seguridad criptográfica y prevención de vulnerabilidades conocidas"
+brain relate PASETO JWT --type PREFERS -w 0.95 --context "Cryptographic security and defense against known vulnerabilities"
 ```
 
-### 5. Ver el Grafo
+### 5. Inspect the Graph
 ```bash
 brain graph PASETO --depth 1
 ```
 
 ---
 
-## ❓ Preguntas Frecuentes y Solución de Problemas
+## ❓ Frequently Asked Questions
 
-#### ¿Puedo usar Local Brain sin GPU?
-**Sí.** El modelo de embeddings `nomic-embed-text-v1.5` en formato cuantizado Q8_0 requiere solo ~140 MB de RAM y se ejecuta con latencias menores a 15 ms por embedding en procesadores x86_64 modernos utilizando CPU pura. Si tienes GPU NVIDIA, `docker-compose.yml` puede aprovechar CUDA para acelerar el procesamiento.
+#### Can I run Local Brain without a GPU?
+**Yes.** The `nomic-embed-text-v1.5` Q8_0 model consumes ~140 MB of RAM and runs at under 15 ms per embedding on modern CPUs. If you have an NVIDIA GPU, CUDA can be used via Docker Compose for higher throughput.
 
-#### ¿Mis datos se envían a algún servidor externo?
-**No.** Local Brain aplica una política de aislamiento local estricta (`--offline`). Toda la persistencia reside en tu PostgreSQL local y todos los vectores se calculan en tu servidor local de `llama.cpp`. No existe ninguna telemetría.
+#### Does Local Brain send data outside my machine?
+**No.** Local Brain enforces a local-first policy (`--offline`). All persistence stays in your local PostgreSQL database, and all vectors are computed locally via `llama.cpp`. There is zero telemetry.
 
-#### ¿Cómo hago una copia de seguridad de mis recuerdos?
-Puedes exportar e importar tu base de conocimiento en formatos JSONL o SQL con integridad criptográfica:
+#### macOS Gatekeeper Warning
+If you download the binary via a browser on macOS, Gatekeeper may flag it as an unverified developer. Simply run:
 ```bash
-# Exportar respaldo
-brain backup -o mi_cerebro.jsonl
-
-# Restaurar respaldo
-brain restore -i mi_cerebro.jsonl
+chmod +x brain
+xattr -d com.apple.quarantine brain
 ```

@@ -239,11 +239,11 @@ impl DoctorDiagnostician for PostgresDoctorDiagnostician {
                                 .and_then(|arr| arr.first())
                                 .and_then(|item| item.get("embedding"))
                                 .and_then(|v| v.as_array())
-                                .and_then(|inner| {
+                                .map(|inner| {
                                     if let Some(serde_json::Value::Array(nested)) = inner.first() {
-                                        Some(nested.len())
+                                        nested.len()
                                     } else {
-                                        Some(inner.len())
+                                        inner.len()
                                     }
                                 })
                         });
