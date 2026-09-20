@@ -1,6 +1,6 @@
 # 🧠 Local Brain
 
-> **Local-first, cognitive persistent memory & knowledge graph for AI coding agents via Model Context Protocol (MCP)**
+> **Structured long-term memory infrastructure for AI coding agents, delivered over the open Model Context Protocol (MCP). Think of it as a local cognitive memory layer.**
 
 🌐 **English** | [Español](README.es.md)
 
@@ -16,25 +16,25 @@
 
 ## ⚡ The Problem: AI Agent Amnesia
 
-Modern AI coding agents (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) excel at solving complex problems within a single context window, but they **completely lose their experience between sessions**.
-
-Every new session starts from scratch:
+Modern AI coding agents (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) excel at solving complex problems within a single context window. But once that context window ends, so does everything they learned in it — by default, nothing carries over to the next session:
 - **Agents repeat the exact same errors** they already spent hours fixing yesterday.
 - **They ignore hard-earned architectural conventions** established in earlier turns.
 - **They cannot explain why a choice was made** (*"why did we migrate from library A to library B last week?"*).
 
-### Why Traditional Vector RAG Fails for Agents
+### Why Plain Vector RAG Falls Short for Agent Memory
 Most existing tools try to solve persistence by dumping raw text or chat transcripts into a vector database:
 ```text
 Raw text chunk → embedding → vector database → cosine similarity search
 ```
-Traditional RAG is a search engine, **not a cognitive brain**. It treats all text as flat chunks, ignores causality, cannot distinguish between an unverified hypothesis and an empirical fact, cannot model step-by-step procedures, and silently hallucinates when past decisions contradict each other.
+That pipeline treats all text as flat, undifferentiated chunks: it has no concept of causality, no way to distinguish an unverified hypothesis from an empirical fact, no model of step-by-step procedures, and no mechanism to flag when two retrieved chunks contradict each other. Local Brain addresses each of those gaps directly — see the comparison below.
 
 ---
 
 ## 💡 The Solution: Local Brain
 
-**Local Brain** is an open-source, local-first cognitive infrastructure that equips AI agents with **structured long-term memory** through the open **Model Context Protocol (MCP)** standard, ensuring 100% privacy and full data sovereignty on the user's hardware.
+**Local Brain** is an open-source, local-first memory infrastructure that equips AI agents with **structured long-term memory** through the open **Model Context Protocol (MCP)** standard, ensuring 100% privacy and full data sovereignty on the user's hardware.
+
+Local Brain does not try to be another agent. It is infrastructure that any MCP-capable agent can consume: Claude Code, Cursor, Codex, a custom in-house agent, or even a traditional application talking to the `brain` CLI directly. One PostgreSQL-backed memory store, shared across whichever tools you point at it — see the [System Architecture](#-system-architecture) diagram below for how the pieces fit together.
 
 ### 🧭 The Golden Rule of Memory
 > **Do not build a brain that simply remembers everything.**  
@@ -49,7 +49,7 @@ Traditional RAG is a search engine, **not a cognitive brain**. It treats all tex
 | **Data Model** | Flat unstructured text chunks | **5 Specialized Cognitive Types** (Working, Episodic, Semantic, Procedural, Associative) |
 | **Relational Reasoning** | None (only distance in latent space) | **Typed Knowledge Graph** (10 canonical relations with cycle-safe DAGs) |
 | **Causality & Experience** | Ignored | Formal episodic triad: **Context ➔ Action ➔ Outcome** |
-| **Empirical Validity** | Assumes all stored text is true | **Empirical Learning Engine**: Fact vs. Belief with Bayesian-like confidence updates |
+| **Empirical Validity** | Assumes all stored text is true | **Empirical Learning Engine**: Fact vs. Belief with evidence-weighted confidence updates |
 | **Contradiction Detection** | None (surfaces opposing text randomly) | **Reflection Engine**: Deterministic conflict clustering and resolution |
 | **Retrieval Strategy** | Vector similarity only | **Hybrid Fusion**: Vectors (768d) + Lexical Full-Text Search + Graph + Recency Decay |
 | **Explainability** | Black-box scores | **Mathematically Explainable** (`--explain` with explicit signal breakdown) |
@@ -193,9 +193,9 @@ Connects memories and entities through 10 canonical relations:
 
 > **DAG Cycle Prevention**: Causal and dependency edges enforce real-time cycle detection, preventing circular reasoning loops in autonomous agents.
 
-### 3. Empirical Learning & Bayesian-like Confidence
+### 3. Empirical Learning & Evidence-Weighted Confidence
 The system enforces a strict boundary between a **Factual Observation** and a **Generalized Belief**:
-- Incoming evidence dynamically updates the confidence score of candidate beliefs.
+- Incoming evidence dynamically updates the confidence score of candidate beliefs through a heuristic evidence-accumulation model — not formal Bayesian inference.
 - Supports typed evidence sources (`Human`, `ToolExecution`, `DirectObservation`, `AgentHypothesis`).
 - Explicit human validation immediately elevates a belief to maximum certainty.
 
@@ -213,6 +213,38 @@ $$Score = w_{sem} \cdot S_{sim} + w_{imp} \cdot S_{imp} + w_{conf} \cdot S_{conf
 Modulated by an **Exponential Half-Life Recency Decay**:
 $$D(t) = 2^{-t / T_{1/2}}$$
 *(Memories with intrinsic importance $\ge 0.85$ are shielded from decay).*
+
+---
+
+## 🎬 Demo: See It Work
+
+A minimal, reproducible round-trip against a real running instance — store two memories, then ask a question:
+
+```bash
+brain remember "PostgreSQL is our production database" --type semantic --project demo --confidence 0.9
+brain remember "We migrated from SQLite because concurrent writes caused problems" --type episodic --project demo
+brain retrieve "Why did we migrate to PostgreSQL?" --project demo --explain
+```
+
+Real output from `brain retrieve --explain` (CLI messages are currently Spanish-only regardless of `$LANG` — this is verbatim, not translated):
+
+```text
+🧠 Local Brain — Recuperación Híbrida Avanzada (SRS §13, §14, §56)
+─────────────────────────────────────────────────────────────────────────────
+Consulta:           "Why did we migrate to PostgreSQL?"
+Candidatos:         40 únicos (Vector: 40, FTS: 0, Grafo: 0)
+Recuerdos devueltos: 1
+─────────────────────────────────────────────────────────────────────────────
+
+[1] Score: 0.6169 | ID: 01a0bd17-fe1d-77d8-add1-a64b9d4a525e | Tipo: Semantic
+    Proyecto:    demo
+    Factores:    Similitud: 0.73 | Importancia: 0.50 | Confianza: 0.90 | Recencia: 1.00
+    Explicación: Score: 0.6169 [Similitud: 0.73 | Importancia: 0.50 | Confianza: 0.90 | Utilidad: 0.50 | Recencia: 1.00]
+    Señales:     Alta confianza empírica validada
+    Contenido:   PostgreSQL is our production database
+```
+
+That single result is itself informative: of the two memories stored, only the `semantic` one about PostgreSQL scored high enough to surface for this query — the `episodic` SQLite migration memory ranked below it on vector similarity for this particular phrasing. The `--explain` breakdown shows exactly why (similarity, importance, confidence, recency), rather than returning an unexplained black-box score.
 
 ---
 
@@ -339,13 +371,20 @@ Local Brain is optimized to deliver sub-millisecond core logic latencies on comm
 | **Storage** | NVMe SSD |
 | **Embedding Model** | `nomic-embed-text-v1.5` Q8_0 (768 dimensions, ~140 MB) |
 
-### Observed Latencies
-- **Domain Invariant Validation & SHA-256**: `< 3 µs`
-- **In-Memory Cosine Similarity**: `< 1 µs`
-- **Multidimensional Scoring with Decay**: `< 500 ns`
-- **Graph Neighborhood Traversal (3 hops)**: `< 100 µs`
-- **PostgreSQL HNSW Vector Search**: `< 5 ms`
-- **End-to-End Hybrid Retrieval Pipeline**: `< 40 ms`
+### Latencies
+
+Full methodology and reproduction commands: [`docs/BENCHMARKS.md`](file:///home/guty_3rrez/Proyectos/local-brain/docs/BENCHMARKS.md).
+
+| Operation | Latency | Status |
+| :--- | :---: | :--- |
+| Domain Invariant Validation & SHA-256 | `< 3 µs` | ✅ Benchmarked (`cargo bench --bench hardware_reference`) |
+| In-Memory Cosine Similarity | `< 1 µs` | ✅ Benchmarked |
+| Multidimensional Scoring with Decay | `< 500 ns` | ✅ Benchmarked |
+| Graph Neighborhood Traversal (3 hops, in-memory) | `< 100 µs` | ✅ Benchmarked |
+| PostgreSQL HNSW Vector Search | `< 5 ms` | 🎯 Design target — no automated end-to-end benchmark yet |
+| End-to-End Hybrid Retrieval Pipeline | `< 40 ms` | 🎯 Design target — no automated end-to-end benchmark yet |
+
+The ✅ rows are measured by the criterion suite in `crates/brain-retrieval/benches/hardware_reference.rs`, which exercises pure in-memory logic (no PostgreSQL, pgvector, or llama.cpp round-trip). The 🎯 rows describe what the architecture is designed to sustain, but aren't yet covered by a reproducible end-to-end benchmark against a real database and embedding server — that's tracked as follow-up work, not a claim you can currently verify yourself.
 
 ---
 

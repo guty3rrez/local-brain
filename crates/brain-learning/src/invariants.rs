@@ -117,3 +117,149 @@ impl LearningInvariants {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::model::{CandidateKnowledge, Evidence, EvidenceSourceType, LearningStage};
+
+    use super::*;
+
+    fn supporting(candidate: &CandidateKnowledge, weight: f32) -> Evidence {
+        Evidence::new(
+            candidate.id,
+            EvidenceSourceType::ToolExecution,
+            "evidencia de soporte",
+            true,
+        )
+        .unwrap()
+        .with_weight(weight)
+        .unwrap()
+    }
+
+    fn contradicting(candidate: &CandidateKnowledge, weight: f32) -> Evidence {
+        Evidence::new(
+            candidate.id,
+            EvidenceSourceType::ToolExecution,
+            "evidencia contradictoria",
+            false,
+        )
+        .unwrap()
+        .with_weight(weight)
+        .unwrap()
+    }
+
+    #[test]
+    fn test_observation_stays_observation_without_enough_support() {
+        let mut candidate = CandidateKnowledge::new_observation("obs", None, None).unwrap();
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(!changed);
+        assert_eq!(candidate.stage, LearningStage::Observation);
+    }
+
+    #[test]
+    fn test_observation_progresses_to_candidate_with_two_supporting_evidences() {
+        let mut candidate = CandidateKnowledge::new_observation("obs", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.8));
+        candidate.add_evidence(supporting(&candidate, 0.8));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Candidate);
+    }
+
+    #[test]
+    fn test_candidate_human_validated_without_contradictions_promotes_immediately() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.human_validated = true;
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Validated);
+    }
+
+    #[test]
+    fn test_validated_degrades_to_candidate_on_mild_contradiction() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.stage = LearningStage::Validated;
+        candidate.add_evidence(contradicting(&candidate, 0.1));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Candidate);
+    }
+
+    #[test]
+    fn test_validated_downgrades_to_rejected_on_heavy_contradiction() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.3));
+        candidate.stage = LearningStage::Validated;
+        candidate.add_evidence(contradicting(&candidate, 0.9));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Rejected);
+    }
+
+    #[test]
+    fn test_validated_stays_validated_without_contradiction() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.stage = LearningStage::Validated;
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(!changed);
+        assert_eq!(candidate.stage, LearningStage::Validated);
+    }
+
+    #[test]
+    fn test_consolidated_degrades_to_candidate_on_contradiction() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.stage = LearningStage::Consolidated;
+        candidate.add_evidence(contradicting(&candidate, 0.5));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Candidate);
+    }
+
+    #[test]
+    fn test_consolidated_stays_consolidated_without_contradiction() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.stage = LearningStage::Consolidated;
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(!changed);
+        assert_eq!(candidate.stage, LearningStage::Consolidated);
+    }
+
+    #[test]
+    fn test_rejected_reactivates_to_candidate_with_strong_renewed_support() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(contradicting(&candidate, 0.2));
+        candidate.stage = LearningStage::Rejected;
+        candidate.add_evidence(supporting(&candidate, 0.9));
+        candidate.add_evidence(supporting(&candidate, 0.9));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(changed);
+        assert_eq!(candidate.stage, LearningStage::Candidate);
+    }
+
+    #[test]
+    fn test_rejected_stays_rejected_without_enough_renewed_support() {
+        let mut candidate = CandidateKnowledge::new_candidate("afirmacion", None, None).unwrap();
+        candidate.add_evidence(contradicting(&candidate, 0.9));
+        candidate.stage = LearningStage::Rejected;
+        candidate.add_evidence(supporting(&candidate, 0.3));
+
+        let changed = LearningInvariants::evaluate_progression(&mut candidate).unwrap();
+        assert!(!changed);
+        assert_eq!(candidate.stage, LearningStage::Rejected);
+    }
+}

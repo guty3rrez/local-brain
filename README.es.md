@@ -1,6 +1,6 @@
 # 🧠 Local Brain
 
-> **Cerebro cognitivo local-first, memoria persistente y grafo de conocimiento para agentes de Inteligencia Artificial**
+> **Infraestructura de memoria estructurada a largo plazo para agentes de IA, entregada sobre el estándar abierto Model Context Protocol (MCP). Piénsalo como una capa de memoria cognitiva local.**
 
 [English](README.md) | 🌐 **Español**
 
@@ -16,25 +16,27 @@
 
 ## ⚡ El Problema: La Amnesia de los Agentes de IA
 
-Los agentes de programación modernos (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) razonan con gran destreza dentro de una ventana de contexto, pero **pierden toda su experiencia al cerrar la sesión**. 
+Los agentes de programación modernos (Claude Code, Cursor, Antigravity, Codex, Windsurf, Cline) razonan con gran destreza dentro de una ventana de contexto. Pero cuando esa ventana termina, también termina todo lo aprendido en ella — por defecto, nada se traslada a la siguiente sesión:
 
 Cada nueva sesión comienza desde cero:
 - **Repiten los mismos errores** que ya resolvieron ayer.
 - **Ignoran las convenciones técnicas** y decisiones acordadas en el proyecto.
 - **Desconocen las causas y consecuencias** de decisiones pasadas.
 
-### ¿Por qué el RAG tradicional no resuelve esto?
+### ¿Por qué el RAG vectorial plano no alcanza para memoria de agentes?
 La mayoría de las herramientas intentan resolver la persistencia arrojando texto plano a una base de datos vectorial:
 ```text
 Documento plano → embedding → vector database → similitud de cosenos
 ```
-El RAG tradicional es un buscador de texto, **no un cerebro cognitivo**. No comprende causalidad (*"¿por qué preferimos la solución A sobre la B?"*), no distingue una hipótesis no probada de un hecho verificado, no modela secuencias de pasos técnicos y sufre de alucinaciones masivas cuando se acumulan contradicciones.
+Ese pipeline trata todo el texto como fragmentos planos e indiferenciados: no tiene noción de causalidad, no distingue una hipótesis no probada de un hecho verificado, no modela secuencias de pasos técnicos, y no tiene mecanismo para marcar cuando dos fragmentos recuperados se contradicen entre sí. Local Brain resuelve cada uno de esos vacíos directamente — ver la comparación abajo.
 
 ---
 
 ## 💡 La Solución: Local Brain
 
-**Local Brain** es una infraestructura cognitiva local-first que dota a los agentes de IA de una **memoria estructurada a largo plazo** a través del estándar abierto **Model Context Protocol (MCP)**, garantizando que el usuario conserve la soberanía absoluta de sus datos en su propio hardware.
+**Local Brain** es una infraestructura de memoria de código abierto y local-first que dota a los agentes de IA de una **memoria estructurada a largo plazo** a través del estándar abierto **Model Context Protocol (MCP)**, garantizando que el usuario conserve la soberanía absoluta de sus datos en su propio hardware.
+
+Local Brain no intenta ser otro agente. Es infraestructura que cualquier agente compatible con MCP puede consumir: Claude Code, Cursor, Codex, un agente propio, o incluso una aplicación tradicional que hable directamente con la CLI `brain`. Un único almacén de memoria respaldado por PostgreSQL, compartido entre las herramientas que apuntes hacia él — ver el diagrama de [Arquitectura del Sistema](#-arquitectura-del-sistema) más abajo para ver cómo encajan las piezas.
 
 ### 🧭 La Regla de Oro Cognitiva
 > **No construir un cerebro que simplemente recuerde todo.**  
@@ -49,7 +51,7 @@ El RAG tradicional es un buscador de texto, **no un cerebro cognitivo**. No comp
 | **Modelo de datos** | Texto plano desestructurado | **5 tipos cognitivos** (Working, Episodic, Semantic, Procedural, Associative) |
 | **Relaciones entre conceptos** | Inexistentes (solo cercanía en espacio latente) | **Grafo de Conocimiento tipado** (10 relaciones canónicas con DAG sin ciclos) |
 | **Causalidad y experiencia** | Ignorada | Tríada episódica formal: **Contexto ➔ Acción ➔ Resultado** |
-| **Validez y certeza** | Asume que todo texto almacenado es verdad | **Motor de Aprendizaje Empírico**: Observaciones vs Creencias con confianza bayesiana |
+| **Validez y certeza** | Asume que todo texto almacenado es verdad | **Motor de Aprendizaje Empírico**: Observaciones vs Creencias con confianza ponderada por evidencia |
 | **Detección de contradicciones** | Ninguna (devuelve información contradictoria al azar) | **Motor de Reflexión y Consolidación**: Detección determinista de conflictos cognitivos |
 | **Estrategia de búsqueda** | Similitud de vectores aislada | **Recuperación Híbrida**: Vectores (768d) + Full-Text Search + Grafo + Recency Decay |
 | **Explicabilidad** | Caja negra | **Matemáticamente explicable** (`--explain` con desglose de señales) |
@@ -193,9 +195,9 @@ Conecta recuerdos y entidades técnicas mediante 10 relaciones semánticas canó
 
 > **Garantía DAG**: Las relaciones de dependencia, causalidad y reemplazo implementan algoritmos deterministas de prevención de ciclos en tiempo real, impidiendo bucles infinitos en el razonamiento de los agentes.
 
-### 3. Motor de Aprendizaje Empírico & Confianza
+### 3. Motor de Aprendizaje Empírico & Confianza Ponderada por Evidencia
 El sistema diferencia de forma estricta entre una **Observación Factual** puntual y una **Creencia Generalizada Candidata**:
-- Cada nueva evidencia de soporte o refutación actualiza dinámicamente la puntuación de confianza del conocimiento.
+- Cada nueva evidencia de soporte o refutación actualiza dinámicamente la puntuación de confianza del conocimiento mediante un modelo heurístico de acumulación de evidencia — no inferencia bayesiana formal.
 - Soporta fuentes de evidencia tipadas (`Human`, `ToolExecution`, `DirectObservation`, `AgentHypothesis`).
 - Las validaciones explícitas de un usuario humano elevan la creencia al grado de máxima certeza.
 
@@ -213,6 +215,38 @@ $$Score = w_{sem} \cdot S_{sim} + w_{imp} \cdot S_{imp} + w_{conf} \cdot S_{conf
 Multiplicado por un factor de **Decaimiento Temporal Exponencial**:
 $$D(t) = 2^{-t / T_{1/2}}$$
 *(Donde recuerdos con importancia intrínseca $\ge 0.85$ quedan protegidos contra el olvido).*
+
+---
+
+## 🎬 Demo: Verlo Funcionar
+
+Un ejemplo mínimo y reproducible contra una instancia real corriendo — guarda dos recuerdos y luego hace una pregunta:
+
+```bash
+brain remember "PostgreSQL is our production database" --type semantic --project demo --confidence 0.9
+brain remember "We migrated from SQLite because concurrent writes caused problems" --type episodic --project demo
+brain retrieve "Why did we migrate to PostgreSQL?" --project demo --explain
+```
+
+Output real de `brain retrieve --explain` (textual, tal como se generó):
+
+```text
+🧠 Local Brain — Recuperación Híbrida Avanzada (SRS §13, §14, §56)
+─────────────────────────────────────────────────────────────────────────────
+Consulta:           "Why did we migrate to PostgreSQL?"
+Candidatos:         40 únicos (Vector: 40, FTS: 0, Grafo: 0)
+Recuerdos devueltos: 1
+─────────────────────────────────────────────────────────────────────────────
+
+[1] Score: 0.6169 | ID: 01a0bd17-fe1d-77d8-add1-a64b9d4a525e | Tipo: Semantic
+    Proyecto:    demo
+    Factores:    Similitud: 0.73 | Importancia: 0.50 | Confianza: 0.90 | Recencia: 1.00
+    Explicación: Score: 0.6169 [Similitud: 0.73 | Importancia: 0.50 | Confianza: 0.90 | Utilidad: 0.50 | Recencia: 1.00]
+    Señales:     Alta confianza empírica validada
+    Contenido:   PostgreSQL is our production database
+```
+
+Ese único resultado ya es informativo: de los dos recuerdos guardados, solo el `semantic` sobre PostgreSQL alcanzó puntaje suficiente para aparecer en esta consulta — el recuerdo `episodic` sobre la migración de SQLite quedó por debajo en similitud vectorial para esta formulación particular. El desglose de `--explain` muestra exactamente por qué (similitud, importancia, confianza, recencia), en vez de devolver un puntaje de caja negra sin explicación.
 
 ---
 
@@ -339,13 +373,20 @@ Local Brain fue probado y optimizado para ejecutarse con latencias mínimas en h
 | **Almacenamiento** | SSD NVMe |
 | **Modelo de Embeddings** | `nomic-embed-text-v1.5` Q8_0 (768 dimensiones, ~140 MB) |
 
-### Métricas de Latencia Observadas
-- **Validación e Invariantes de Dominio**: `< 3 µs`
-- **Similitud Coseno pura en memoria**: `< 1 µs`
-- **Scoring Multidimensional con Decaimiento**: `< 500 ns`
-- **Navegación de Grafo (3 saltos)**: `< 100 µs`
-- **Búsqueda Vectorial HNSW en PostgreSQL**: `< 5 ms`
-- **Pipeline Híbrido End-to-End**: `< 40 ms`
+### Latencias
+
+Metodología completa y comandos de reproducción: [`docs/BENCHMARKS.md`](file:///home/guty_3rrez/Proyectos/local-brain/docs/BENCHMARKS.md).
+
+| Operación | Latencia | Estado |
+| :--- | :---: | :--- |
+| Validación e Invariantes de Dominio + SHA-256 | `< 3 µs` | ✅ Medido (`cargo bench --bench hardware_reference`) |
+| Similitud Coseno pura en memoria | `< 1 µs` | ✅ Medido |
+| Scoring Multidimensional con Decaimiento | `< 500 ns` | ✅ Medido |
+| Navegación de Grafo (3 saltos, en memoria) | `< 100 µs` | ✅ Medido |
+| Búsqueda Vectorial HNSW en PostgreSQL | `< 5 ms` | 🎯 Objetivo de diseño — sin benchmark end-to-end automatizado todavía |
+| Pipeline Híbrido End-to-End | `< 40 ms` | 🎯 Objetivo de diseño — sin benchmark end-to-end automatizado todavía |
+
+Las filas ✅ están medidas por la suite de criterion en `crates/brain-retrieval/benches/hardware_reference.rs`, que ejercita lógica pura en memoria (sin ida y vuelta real a PostgreSQL, pgvector o llama.cpp). Las filas 🎯 describen lo que la arquitectura está diseñada para soportar, pero aún no están cubiertas por un benchmark end-to-end reproducible contra una base de datos y servidor de embeddings reales — eso queda registrado como trabajo futuro, no como una afirmación que puedas verificar hoy tú mismo.
 
 ---
 

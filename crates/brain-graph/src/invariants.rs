@@ -73,3 +73,127 @@ impl GraphInvariants {
         Ok(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chrono::Utc;
+
+    use super::*;
+    use crate::model::EdgeId;
+
+    fn raw_edge(source_id: NodeId, target_id: NodeId, weight: f32) -> GraphEdge {
+        // Construido con un literal de struct (no `GraphEdge::new`) a propósito:
+        // `GraphEdge::new` ya rechaza auto-bucles y pesos inválidos por su cuenta,
+        // así que un edge inválido nunca llegaría aquí en producción. Estos tests
+        // verifican el invariante de `GraphInvariants::validate_edge` en aislamiento,
+        // como defensa en profundidad independiente del constructor.
+        let now = Utc::now();
+        GraphEdge {
+            id: EdgeId::new(),
+            source_id,
+            target_id,
+            relation_type: RelationType::RelatedTo,
+            weight,
+            metadata: serde_json::json!({}),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn test_validate_edge_accepts_valid_edge() {
+        let edge = raw_edge(NodeId::new(), NodeId::new(), 0.5);
+        assert!(GraphInvariants::validate_edge(&edge).is_ok());
+    }
+
+    #[test]
+    fn test_validate_edge_rejects_self_loop() {
+        let node_id = NodeId::new();
+        let edge = raw_edge(node_id, node_id, 0.5);
+        match GraphInvariants::validate_edge(&edge) {
+            Err(GraphError::SelfLoopForbidden { node_id: id, .. }) => {
+                assert_eq!(id, node_id.to_string());
+            }
+            other => panic!("Se esperaba SelfLoopForbidden, recibido: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_validate_edge_rejects_weight_out_of_range() {
+        let below = raw_edge(NodeId::new(), NodeId::new(), -0.1);
+        assert!(matches!(
+            GraphInvariants::validate_edge(&below),
+            Err(GraphError::InvalidWeight(_))
+        ));
+
+        let above = raw_edge(NodeId::new(), NodeId::new(), 1.1);
+        assert!(matches!(
+            GraphInvariants::validate_edge(&above),
+            Err(GraphError::InvalidWeight(_))
+        ));
+    }
+
+    #[test]
+    fn test_would_create_cycle_false_for_non_acyclic_relation() {
+        let source = NodeId::new();
+        let target = NodeId::new();
+        // RELATED_TO no es acíclica: nunca reporta ciclo, sin importar la topología.
+        let result = GraphInvariants::would_create_cycle(
+            &source,
+            &target,
+            RelationType::RelatedTo,
+            |_, _| vec![source],
+        );
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_would_create_cycle_true_for_self_reference() {
+        let node = NodeId::new();
+        let result = GraphInvariants::would_create_cycle(
+            &node,
+            &node,
+            RelationType::DependsOn,
+            |_, _| vec![],
+        );
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_would_create_cycle_detects_transitive_cycle() {
+        // a -> b -> c ya existe. Proponer c -> a cerraría el ciclo.
+        let a = NodeId::new();
+        let b = NodeId::new();
+        let c = NodeId::new();
+
+        let mut edges: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        edges.insert(a, vec![b]);
+        edges.insert(b, vec![c]);
+
+        let result =
+            GraphInvariants::would_create_cycle(&c, &a, RelationType::DependsOn, |node, _| {
+                edges.get(node).cloned().unwrap_or_default()
+            });
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_would_create_cycle_false_for_linear_graph() {
+        // a -> b -> c ya existe. Proponer a -> c NO cierra ningún ciclo (sigue siendo un DAG).
+        let a = NodeId::new();
+        let b = NodeId::new();
+        let c = NodeId::new();
+
+        let mut edges: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        edges.insert(a, vec![b]);
+        edges.insert(b, vec![c]);
+
+        let result =
+            GraphInvariants::would_create_cycle(&a, &c, RelationType::DependsOn, |node, _| {
+                edges.get(node).cloned().unwrap_or_default()
+            });
+        assert!(!result.unwrap());
+    }
+}
