@@ -8,7 +8,7 @@
 
 Security and data integrity are paramount. If you discover a security vulnerability in Local Brain, please **DO NOT open a public issue**.
 
-Instead, report vulnerabilities privately by opening a [Security Advisory on GitHub](https://github.com/local-brain/local-brain/security/advisories/new) or contacting the maintainers directly.
+Instead, report vulnerabilities privately by opening a [Security Advisory on GitHub](https://github.com/guty3rrez/local-brain/security/advisories/new) or contacting the maintainers directly.
 
 Please include:
 - Technical description of the vulnerability.

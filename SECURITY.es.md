@@ -6,7 +6,7 @@
 
 La seguridad de los datos y de la memoria de los usuarios es crítica. Si descubres una vulnerabilidad de seguridad en Local Brain, por favor **NO abras un issue público**.
 
-En su lugar, reporta la vulnerabilidad de manera privada creando un [Security Advisory en GitHub](https://github.com/local-brain/local-brain/security/advisories/new) o contactando directamente a los mantenedores del proyecto.
+En su lugar, reporta la vulnerabilidad de manera privada creando un [Security Advisory en GitHub](https://github.com/guty3rrez/local-brain/security/advisories/new) o contactando directamente a los mantenedores del proyecto.
 
 Por favor incluye:
 - Descripción técnica de la vulnerabilidad.

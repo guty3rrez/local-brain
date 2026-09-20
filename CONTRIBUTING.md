@@ -11,7 +11,7 @@ We welcome contributions from both **human developers and autonomous AI agents**
 
 ## 🧭 How Can I Help?
 
-1. **Implementing Open Issues**: Check [GitHub Issues and Milestones](https://github.com/local-brain/local-brain/issues) for available tasks. Comment on an issue before starting work to avoid duplicate effort.
+1. **Implementing Open Issues**: Check [GitHub Issues and Milestones](https://github.com/guty3rrez/local-brain/issues) for available tasks. Comment on an issue before starting work to avoid duplicate effort.
 2. **Writing BDD Scenarios & Test Cases**: Add Gherkin scenarios in `tests/features/` capturing real agent workflows, or expand mutation testing suites with `cargo-mutants`.
 3. **Proposing Architectural Decision Records (ADRs)**: Open an Issue using the RFC/ADR template to discuss technology choices, schema designs, or embedding strategies.
 4. **Running Hardware Benchmarks**: Help us benchmark across diverse hardware (Apple Silicon, AMD GPUs, NVIDIA GPUs) and report latency and memory footprints.

@@ -11,7 +11,7 @@ Aceptamos contribuciones de **desarrolladores humanos y agentes de IA**. Para ma
 
 ## 🧭 ¿Cómo Puedo Colaborar?
 
-1. **Implementando Tareas y Mejoras**: Consulta los [GitHub Issues y Milestones](https://github.com/local-brain/local-brain/issues) para encontrar tareas disponibles. Si deseas trabajar en una, coméntalo en el issue correspondiente para asignártela y evitar duplicar esfuerzos.
+1. **Implementando Tareas y Mejoras**: Consulta los [GitHub Issues y Milestones](https://github.com/guty3rrez/local-brain/issues) para encontrar tareas disponibles. Si deseas trabajar en una, coméntalo en el issue correspondiente para asignártela y evitar duplicar esfuerzos.
 2. **Escribiendo Escenarios BDD y Casos de Prueba**: Redacta escenarios en Gherkin (`tests/features/`) que describan casos de uso reales de agentes de IA o agrega tests de mutación con `cargo-mutants`.
 3. **Proponiendo Decisiones Arquitectónicas (ADRs)**: Abre un Issue con la plantilla de RFC / ADR para discutir elecciones tecnológicas, esquemas de bases de datos o estrategias de embeddings.
 4. **Ejecutando Benchmarks**: Si tienes hardware con GPU NVIDIA, AMD o Apple Silicon, ayúdanos a correr los benchmarks de rendimiento y registrar métricas de consumo de VRAM y latencia.

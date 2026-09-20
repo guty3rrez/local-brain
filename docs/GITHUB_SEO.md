@@ -18,7 +18,7 @@ Local-first, cognitive persistent memory & knowledge graph for AI coding agents 
 
 ### 1.2 URL del Proyecto (Website)
 ```text
-https://github.com/local-brain/local-brain#readme
+https://github.com/guty3rrez/local-brain#readme
 ```
 
 ### 1.3 Tópicos Estratégicos (Topics / Tags)
@@ -103,7 +103,7 @@ Local Brain approaches agent memory as a structured cognitive system:
 
 Everything is open source under AGPLv3. Prebuilt binaries and a 2-minute automated docker quickstart are available.
 
-Code: https://github.com/local-brain/local-brain
+Code: https://github.com/guty3rrez/local-brain
 
 Feedback and questions on the cognitive architecture or MCP integration are warmly welcome!
 ```
@@ -125,7 +125,7 @@ Instead of naive vector RAG (which treats all memory as flat embeddings), we bui
 Quickstart with Docker Compose:
 `./scripts/quickstart.sh`
 
-Repo: https://github.com/local-brain/local-brain
+Repo: https://github.com/guty3rrez/local-brain
 
 Would love to hear your thoughts on cognitive memory modeling for autonomous agents!
 ```
@@ -137,7 +137,7 @@ Would love to hear your thoughts on cognitive memory modeling for autonomous age
 Vector RAG isn't enough. We need structured cognitive memory.
 
 Introducing Local Brain v1.0 🧠👇
-https://github.com/local-brain/local-brain
+https://github.com/guty3rrez/local-brain
 
 2/6 Why does naive RAG fail for agents?
 Because human/agent experience isn't just flat text chunks.
@@ -163,8 +163,8 @@ And every score can be mathematically explained (`--explain`).
 
 6/6 Fully open source under AGPLv3.
 Try it in 2 minutes:
-`git clone https://github.com/local-brain/local-brain && ./scripts/quickstart.sh`
+`git clone https://github.com/guty3rrez/local-brain && ./scripts/quickstart.sh`
 
-GitHub: https://github.com/local-brain/local-brain
+GitHub: https://github.com/guty3rrez/local-brain
 ⭐ Star the repo if you believe local agents need persistent brains!
 ```

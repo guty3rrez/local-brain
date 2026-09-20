@@ -4,10 +4,10 @@
 
 [English](README.md) | 🌐 **Español**
 
-[![Version: v1.0.0](https://img.shields.io/badge/Version-v1.0.0-blue.svg)](https://github.com/local-brain/local-brain/releases)
+[![Version: v1.0.0](https://img.shields.io/badge/Version-v1.0.0-blue.svg)](https://github.com/guty3rrez/local-brain/releases)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust: 1.85+](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
-[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](https://github.com/local-brain/local-brain/actions)
+[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](https://github.com/guty3rrez/local-brain/actions)
 [![Protocol: Model Context Protocol (MCP)](https://img.shields.io/badge/Protocol-MCP_Standard-blueviolet.svg)](https://modelcontextprotocol.io/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-arquitectura-del-sistema)
 [![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacidad-y-seguridad-local-first)
@@ -65,7 +65,7 @@ Local Brain incluye automatización completa para levantar sus servicios auxilia
 ### Opción A: Asistente Automatizado (Recomendado)
 ```bash
 # 1. Clonar el repositorio
-git clone https://github.com/local-brain/local-brain.git
+git clone https://github.com/guty3rrez/local-brain.git
 cd local-brain
 
 # 2. Ejecutar el asistente de onboarding
@@ -367,7 +367,7 @@ Agradecemos enormemente las contribuciones de la comunidad (tanto de desarrollad
    - Para desarrolladores: [`CONTRIBUTING.md`](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.md).
    - Para agentes de IA: [`AGENTS.md`](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md).
    - Para Claude Code: [`CLAUDE.md`](file:///home/guty_3rrez/Proyectos/local-brain/CLAUDE.md).
-2. **Explora Tareas**: Revisa los [GitHub Issues y Milestones](https://github.com/local-brain/local-brain/issues).
+2. **Explora Tareas**: Revisa los [GitHub Issues y Milestones](https://github.com/guty3rrez/local-brain/issues).
 3. **Decisiones de Diseño**: Consulta las decisiones registradas en [`docs/adr/`](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr).
 
 ---

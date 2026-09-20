@@ -9,7 +9,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Local Brain Contributors"]
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/local-brain/local-brain"
+repository = "https://github.com/guty3rrez/local-brain"
 readme = "README.md"
 rust-version = "1.85"
 

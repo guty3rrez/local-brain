@@ -43,11 +43,11 @@ The script automatically:
 ## 🛠️ Method 2: Manual Step-by-Step
 
 ### Step 1: Download the Pre-built Binary
-Download the binary for your platform from [GitHub Releases](https://github.com/local-brain/local-brain/releases):
+Download the binary for your platform from [GitHub Releases](https://github.com/guty3rrez/local-brain/releases):
 
 ```bash
 # Example for Linux x86_64:
-curl -sL https://github.com/local-brain/local-brain/releases/latest/download/brain-linux-x86_64.tar.gz | tar xz
+curl -sL https://github.com/guty3rrez/local-brain/releases/latest/download/brain-linux-x86_64.tar.gz | tar xz
 sudo install -m 755 brain /usr/local/bin/brain
 ```
 

@@ -43,11 +43,11 @@ El script se encargará automáticamente de:
 ## 🛠️ Método 2: Paso a Paso Manual
 
 ### Paso 1: Descargar el Binario de Local Brain
-Descarga el binario precompilado para tu plataforma desde [GitHub Releases](https://github.com/local-brain/local-brain/releases):
+Descarga el binario precompilado para tu plataforma desde [GitHub Releases](https://github.com/guty3rrez/local-brain/releases):
 
 ```bash
 # Ejemplo para Linux x86_64:
-curl -sL https://github.com/local-brain/local-brain/releases/latest/download/brain-linux-x86_64.tar.gz | tar xz
+curl -sL https://github.com/guty3rrez/local-brain/releases/latest/download/brain-linux-x86_64.tar.gz | tar xz
 sudo install -m 755 brain /usr/local/bin/brain
 ```
 

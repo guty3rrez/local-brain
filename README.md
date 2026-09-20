@@ -4,10 +4,10 @@
 
 🌐 **English** | [Español](README.es.md)
 
-[![Version: v1.0.0](https://img.shields.io/badge/Version-v1.0.0-blue.svg)](https://github.com/local-brain/local-brain/releases)
+[![Version: v1.0.0](https://img.shields.io/badge/Version-v1.0.0-blue.svg)](https://github.com/guty3rrez/local-brain/releases)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust: 1.85+](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
-[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](https://github.com/local-brain/local-brain/actions)
+[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen.svg)](https://github.com/guty3rrez/local-brain/actions)
 [![Protocol: Model Context Protocol (MCP)](https://img.shields.io/badge/Protocol-MCP_Standard-blueviolet.svg)](https://modelcontextprotocol.io/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-system-architecture)
 [![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacy--local-first-security)
@@ -65,7 +65,7 @@ Local Brain includes automated setup for all auxiliary local services (PostgreSQ
 ### Option A: Automated Onboarding Wizard (Recommended)
 ```bash
 # 1. Clone the repository
-git clone https://github.com/local-brain/local-brain.git
+git clone https://github.com/guty3rrez/local-brain.git
 cd local-brain
 
 # 2. Run the interactive setup script
@@ -367,7 +367,7 @@ We warmly welcome contributions from human engineers and autonomous AI agents:
    - For human developers: [`CONTRIBUTING.md`](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.md) ([Español](file:///home/guty_3rrez/Proyectos/local-brain/CONTRIBUTING.es.md)).
    - For AI agents: [`AGENTS.md`](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.md) ([Español](file:///home/guty_3rrez/Proyectos/local-brain/AGENTS.es.md)).
    - For Claude Code: [`CLAUDE.md`](file:///home/guty_3rrez/Proyectos/local-brain/CLAUDE.md).
-2. **Explore Open Issues**: Check [GitHub Issues & Milestones](https://github.com/local-brain/local-brain/issues).
+2. **Explore Open Issues**: Check [GitHub Issues & Milestones](https://github.com/guty3rrez/local-brain/issues).
 3. **Architecture Decision Records**: Read technical rationale in [`docs/adr/`](file:///home/guty_3rrez/Proyectos/local-brain/docs/adr/).
 
 ---
