@@ -52,6 +52,15 @@ services:
       --port 8081
       --embedding
       -c 2048
+    healthcheck:
+      # La imagen base trae un HEALTHCHECK apuntando al puerto 8080 por defecto,
+      # que no coincide con --port 8081 usado arriba. Lo sobreescribimos para
+      # que el estado "healthy"/"unhealthy" de `docker compose ps` sea real.
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   pgdata:

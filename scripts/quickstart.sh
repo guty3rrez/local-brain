@@ -7,7 +7,9 @@
 #   2. Descarga el modelo de embeddings e inicia servicios locales
 #   3. Ejecuta migraciones de base de datos (brain init)
 #   4. Diagnostica la salud del sistema (brain doctor)
-#   5. Imprime snippets de configuración MCP listos para copiar y pegar
+#   5. Si detecta Claude Code, instala el skill del agente y registra el MCP
+#      automáticamente (scope global, disponible en todos tus repos)
+#   6. Imprime snippets de configuración MCP para el resto de clientes
 # ==============================================================================
 
 set -euo pipefail
@@ -25,7 +27,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo -e "${BOLD}${BLUE}🧠 Bienvenido a Local Brain v1.0 — Asistente de Configuración Rápida${NC}\n"
 
 # 1. Verificar Docker
-echo -e "${BOLD}[1/5] Verificando dependencias del sistema...${NC}"
+echo -e "${BOLD}[1/6] Verificando dependencias del sistema...${NC}"
 if ! command -v docker &>/dev/null; then
     echo -e "${RED}❌ Docker no está instalado. Por favor instálalo desde https://docs.docker.com/get-docker/${NC}"
     exit 1
@@ -44,7 +46,7 @@ MODEL_URL="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/ma
 
 mkdir -p "${MODEL_DIR}"
 if [ ! -f "${MODEL_FILE}" ]; then
-    echo -e "\n${BOLD}[2/5] Descargando modelo de embeddings nomic-embed-text-v1.5 (~140 MB)...${NC}"
+    echo -e "\n${BOLD}[2/6] Descargando modelo de embeddings nomic-embed-text-v1.5 (~140 MB)...${NC}"
     if command -v curl &>/dev/null; then
         curl -L --progress-bar -o "${MODEL_FILE}" "${MODEL_URL}"
     elif command -v wget &>/dev/null; then
@@ -55,7 +57,7 @@ else
 fi
 
 # 3. Iniciar servicios en segundo plano
-echo -e "\n${BOLD}[3/5] Iniciando PostgreSQL 17 (pgvector) y llama.cpp server...${NC}"
+echo -e "\n${BOLD}[3/6] Iniciando PostgreSQL 17 (pgvector) y llama.cpp server...${NC}"
 cd "${ROOT_DIR}"
 docker compose up -d
 
@@ -80,7 +82,7 @@ else
 fi
 
 # 4. Localizar o compilar binario brain
-echo -e "\n${BOLD}[4/5] Verificando binario de Local Brain (brain CLI)...${NC}"
+echo -e "\n${BOLD}[4/6] Verificando binario de Local Brain (brain CLI)...${NC}"
 BRAIN_BIN=""
 if command -v brain &>/dev/null; then
     BRAIN_BIN="$(command -v brain)"
@@ -94,24 +96,51 @@ elif command -v cargo &>/dev/null; then
     BRAIN_BIN="${ROOT_DIR}/target/release/brain"
 fi
 
+BRAIN_FOUND=false
 if [ -n "${BRAIN_BIN}" ]; then
     echo -e "${GREEN}✓ Binario detectado en: ${BRAIN_BIN}${NC}"
     echo -e "\n🔄 Ejecutando migraciones de base de datos..."
     "${BRAIN_BIN}" init
     echo -e "\n🩺 Diagnóstico del sistema:"
     "${BRAIN_BIN}" doctor || true
+    BRAIN_FOUND=true
 else
     echo -e "${YELLOW}ℹ️ No se detectó binario 'brain'. Puedes descargarlo de GitHub Releases o compilarlo con:${NC}"
     echo -e "   ${BOLD}cargo build --release --bin brain${NC}"
     BRAIN_BIN="brain"
 fi
 
-# 5. Imprimir configuraciones MCP para agentes
+# 5. Instalar skill de agente + registrar MCP en Claude Code (si está disponible)
+echo -e "\n${BOLD}[5/6] Integrando con Claude Code (skill + MCP)...${NC}"
+if command -v claude &>/dev/null && [ "${BRAIN_FOUND}" = true ]; then
+    SKILL_SRC="${ROOT_DIR}/.agents/skills/local-brain"
+    SKILL_DST="${HOME}/.agents/skills/local-brain"
+    mkdir -p "${SKILL_DST}"
+    cp -r "${SKILL_SRC}"/* "${SKILL_DST}/"
+    mkdir -p "${HOME}/.claude/skills"
+    ln -sf "${SKILL_DST}" "${HOME}/.claude/skills/local-brain"
+    echo -e "${GREEN}✓ Skill instalado en ~/.claude/skills/local-brain${NC}"
+
+    if claude mcp get local-brain &>/dev/null; then
+        echo -e "${GREEN}✓ MCP 'local-brain' ya estaba registrado en Claude Code.${NC}"
+    elif claude mcp add local-brain "${BRAIN_BIN}" -s user -- \
+        --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain \
+        --embedding-url http://127.0.0.1:8081/embedding \
+        mcp &>/dev/null; then
+        echo -e "${GREEN}✓ MCP 'local-brain' registrado en Claude Code (scope 'user', disponible en todos tus repos).${NC}"
+    else
+        echo -e "${YELLOW}⚠️ No se pudo registrar el MCP automáticamente. Usa el comando manual en la sección de abajo.${NC}"
+    fi
+else
+    echo -e "${YELLOW}ℹ️ Claude Code CLI ('claude') no detectado, o falta el binario 'brain'. Omitiendo integración automática — usa los pasos manuales de abajo.${NC}"
+fi
+
+# 6. Imprimir configuraciones MCP para el resto de agentes
 echo -e "\n${BOLD}${GREEN}==============================================================================${NC}"
 echo -e "${BOLD}${GREEN}✨ ¡Local Brain está listo para operar!${NC}"
 echo -e "${BOLD}${GREEN}==============================================================================${NC}\n"
 
-echo -e "${BOLD}Conecta tus agentes de IA agregando la siguiente configuración MCP:${NC}\n"
+echo -e "${BOLD}Para el resto de tus agentes de IA, agrega la siguiente configuración MCP:${NC}\n"
 
 echo -e "${BOLD}${BLUE}1. Claude Desktop${NC} (en su archivo de configuración claude_desktop_config.json):"
 cat << EOF
@@ -129,8 +158,8 @@ cat << EOF
 }
 EOF
 
-echo -e "\n${BOLD}${BLUE}2. Claude Code CLI${NC} (ejecutar directamente en tu terminal):"
-echo -e "${BOLD}claude mcp add local-brain ${BRAIN_BIN} -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp${NC}\n"
+echo -e "\n${BOLD}${BLUE}2. Claude Code CLI${NC} (si el paso [5/6] no pudo hacerlo por ti — el flag ${BOLD}-s user${NC}${BLUE} lo deja disponible en todos tus repos):"
+echo -e "${BOLD}claude mcp add local-brain ${BRAIN_BIN} -s user -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp${NC}\n"
 
 echo -e "${BOLD}${BLUE}3. Cursor / Windsurf${NC} (en .cursor/mcp.json o mcp_config.json):"
 cat << EOF

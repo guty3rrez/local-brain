@@ -36,7 +36,10 @@ The script automatically:
 3. Waits for PostgreSQL and llama.cpp to report healthy status.
 4. Applies database migrations (`brain init`).
 5. Executes a full system health diagnostic (`brain doctor`).
-6. Prints copy-pasteable MCP configuration blocks for your AI tools.
+6. **If it detects the Claude Code CLI (`claude`)**: installs the agent skill into `~/.claude/skills/local-brain` and registers the MCP server with `user` scope (available in all your repos) — zero manual steps.
+7. Prints copy-pasteable MCP configuration blocks for the rest of your clients (Claude Desktop, Cursor, Windsurf, Cline).
+
+> On a machine with Docker + Claude Code already installed, Method 1 leaves you with the stack running, the skill installed, and the MCP connected in one command — no config file to edit by hand.
 
 ---
 
@@ -136,10 +139,22 @@ Edit your `claude_desktop_config.json`:
 ```
 
 ### 2. Claude Code CLI
-Add the server with a single command:
+> `./scripts/quickstart.sh` already does this for you automatically (see above). Use the manual command only if the script couldn't detect `claude`, or you want to register it yourself.
+
+Add the server with a single command. The `-s user` flag matters: without it, the MCP is only registered for the current repo (local scope); with it, it's available in **all** your projects:
 ```bash
-claude mcp add local-brain brain -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
+claude mcp add local-brain brain -s user -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
 ```
+
+### 2.1 Agent Skill for Claude Code
+Beyond the MCP server, install the skill (`local-brain/SKILL.md`) so the agent knows **when and how** to use the `brain_*` tools without you having to ask explicitly:
+```bash
+mkdir -p ~/.agents/skills/local-brain
+cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
+mkdir -p ~/.claude/skills
+ln -sf ~/.agents/skills/local-brain ~/.claude/skills/local-brain
+```
+Full details in [`.agents/skills/local-brain/README.md`](../.agents/skills/local-brain/README.md).
 
 ### 3. Cursor & Windsurf
 Add to `.cursor/mcp.json` or your MCP Settings:

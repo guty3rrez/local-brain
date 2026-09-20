@@ -15,8 +15,19 @@ Official agent skill for **Local Brain**. Provides autonomous AI agents (Claude 
 
 ## 🚀 Installation
 
-To install globally for Antigravity or your local agent runtime:
+`./scripts/quickstart.sh` does this for you automatically when it detects the Claude Code CLI (`claude`) — see [`docs/QUICKSTART.md`](../../../docs/QUICKSTART.md). Use the manual steps below only if you're not using the wizard, or for a different agent runtime.
 
+### Claude Code
+Claude Code discovers skills through `~/.claude/skills/<name>`. Copy the skill to `~/.agents/skills` (the shared source of truth other tools also read from) and symlink it in:
+
+```bash
+mkdir -p ~/.agents/skills/local-brain
+cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
+mkdir -p ~/.claude/skills
+ln -sf ~/.agents/skills/local-brain ~/.claude/skills/local-brain
+```
+
+### Antigravity / other local agent runtimes
 ```bash
 mkdir -p ~/.agents/skills/local-brain
 cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/

@@ -36,7 +36,10 @@ El script se encargará automáticamente de:
 3. Esperar que PostgreSQL y llama.cpp estén saludables.
 4. Aplicar las migraciones de base de datos (`brain init`).
 5. Ejecutar un diagnóstico de salud del sistema (`brain doctor`).
-6. Imprimir los bloques de configuración MCP listos para tu cliente favorito.
+6. **Si detecta la CLI de Claude Code (`claude`)**: instalar el skill del agente en `~/.claude/skills/local-brain` y registrar el servidor MCP con scope `user` (disponible en todos tus repos) — sin pasos manuales.
+7. Imprimir los bloques de configuración MCP listos para el resto de clientes (Claude Desktop, Cursor, Windsurf, Cline).
+
+> Con el Método 1 en un sistema con Docker + Claude Code ya instalados, terminas con el stack corriendo, el skill instalado y el MCP conectado en un solo comando — sin editar ningún archivo de configuración a mano.
 
 ---
 
@@ -125,10 +128,22 @@ Edita tu archivo `claude_desktop_config.json`:
 ```
 
 ### 2. Claude Code CLI
-Añade Local Brain en un solo comando:
+> `./scripts/quickstart.sh` ya hace esto por ti automáticamente (ver arriba). Usa el comando manual solo si el script no pudo detectar `claude` o quieres registrarlo tú mismo.
+
+Añade Local Brain con un solo comando. El flag `-s user` es importante: sin él, el MCP queda registrado solo para el repo actual (scope local); con él queda disponible en **todos** tus proyectos:
 ```bash
-claude mcp add local-brain brain -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
+claude mcp add local-brain brain -s user -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp
 ```
+
+### 2.1 Skill del Agente para Claude Code
+Además del MCP, instala el skill (`local-brain/SKILL.md`) para que el agente sepa **cuándo y cómo** usar las herramientas `brain_*` sin que se lo pidas explícitamente:
+```bash
+mkdir -p ~/.agents/skills/local-brain
+cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
+mkdir -p ~/.claude/skills
+ln -sf ~/.agents/skills/local-brain ~/.claude/skills/local-brain
+```
+Detalle completo en [`.agents/skills/local-brain/README.md`](../.agents/skills/local-brain/README.md).
 
 ### 3. Cursor & Windsurf
 Crea o edita `.cursor/mcp.json` en la raíz de tu proyecto (o la configuración global de MCP en Cursor/Windsurf Settings):
