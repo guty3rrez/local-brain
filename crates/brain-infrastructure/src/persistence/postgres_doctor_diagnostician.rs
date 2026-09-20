@@ -204,55 +204,65 @@ impl DoctorDiagnostician for PostgresDoctorDiagnostician {
             .build()
             .map_err(|e| ApplicationError::Internal(e.to_string()))?;
 
-        // 1. Probar conectividad HTTP básica
-        let ping_res = client.get(&self.embedding_url).send().await;
+        // Probar directamente generación de embedding con timeout corto
+        let test_body = serde_json::json!({
+            "content": "test health check"
+        });
+
+        let embed_res = client
+            .post(&self.embedding_url)
+            .json(&test_body)
+            .send()
+            .await;
+
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-        match ping_res {
-            Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 405 => {
-                // Endpoint responde. Intentar un embedding de prueba pequeño para verificar dimensión 768
-                let test_body = serde_json::json!({
-                    "content": "test health check"
-                });
+        match embed_res {
+            Ok(emb_resp) if emb_resp.status().is_success() => {
+                if let Ok(json_val) = emb_resp.json::<serde_json::Value>().await {
+                    let dim_opt = json_val
+                        .get("embedding")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .or_else(|| {
+                            json_val
+                                .get("data")
+                                .and_then(|d| d.as_array())
+                                .and_then(|a| a.first())
+                                .and_then(|item| item.get("embedding"))
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.len())
+                        })
+                        .or_else(|| {
+                            json_val
+                                .as_array()
+                                .and_then(|arr| arr.first())
+                                .and_then(|item| item.get("embedding"))
+                                .and_then(|v| v.as_array())
+                                .and_then(|inner| {
+                                    if let Some(serde_json::Value::Array(nested)) = inner.first() {
+                                        Some(nested.len())
+                                    } else {
+                                        Some(inner.len())
+                                    }
+                                })
+                        });
 
-                let embed_res = client
-                    .post(&self.embedding_url)
-                    .json(&test_body)
-                    .send()
-                    .await;
-
-                if let Ok(emb_resp) = embed_res {
-                    if let Ok(json_val) = emb_resp.json::<serde_json::Value>().await {
-                        let dim_opt = json_val
-                            .get("embedding")
-                            .and_then(|v| v.as_array())
-                            .map(|a| a.len())
-                            .or_else(|| {
-                                json_val
-                                    .get("data")
-                                    .and_then(|d| d.as_array())
-                                    .and_then(|a| a.first())
-                                    .and_then(|item| item.get("embedding"))
-                                    .and_then(|v| v.as_array())
-                                    .map(|a| a.len())
-                            });
-
-                        if let Some(dim) = dim_opt {
-                            if dim == 768 {
-                                return Ok(HealthCheck::ok_with_latency(
-                                    "Embeddings",
-                                    "Runtime llama.cpp",
-                                    format!("En línea y respondiendo a {} (dimensión: 768d)", self.embedding_url),
-                                    elapsed_ms,
-                                ));
-                            } else {
-                                return Ok(HealthCheck::warn(
-                                    "Embeddings",
-                                    "Runtime llama.cpp",
-                                    format!("En línea pero retornó dimensión {} (se esperaba 768)", dim),
-                                    "Verifica que el modelo cargado sea nomic-embed-text-v1.5 de 768 dimensiones",
-                                ));
-                            }
+                    if let Some(dim) = dim_opt {
+                        if dim == 768 {
+                            return Ok(HealthCheck::ok_with_latency(
+                                "Embeddings",
+                                "Runtime llama.cpp",
+                                format!("En línea y respondiendo a {} (dimensión: 768d)", self.embedding_url),
+                                elapsed_ms,
+                            ));
+                        } else {
+                            return Ok(HealthCheck::warn(
+                                "Embeddings",
+                                "Runtime llama.cpp",
+                                format!("En línea pero retornó dimensión {} (se esperaba 768)", dim),
+                                "Verifica que el modelo cargado sea nomic-embed-text-v1.5 de 768 dimensiones",
+                            ));
                         }
                     }
                 }
@@ -274,7 +284,7 @@ impl DoctorDiagnostician for PostgresDoctorDiagnostician {
                 "Embeddings",
                 "Runtime llama.cpp",
                 format!("Fuera de línea ({}) - {e}", self.embedding_url),
-                "Inicia el contenedor de embeddings: 'docker compose up -d llama-embed' o './scripts/setup-services.sh'",
+                "Inicia el contenedor de embeddings: 'docker compose up -d' o './scripts/setup-services.sh'",
             )),
         }
     }
