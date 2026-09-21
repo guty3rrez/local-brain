@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use brain_application::{
     ConsolidateUseCase, ExpireSessionUseCase, ExplainUseCase, ForgetUseCase, HybridRetrieveUseCase,
@@ -13,7 +13,7 @@ use brain_core::CORE_VERSION;
 
 use crate::protocol::{
     InitializeResult, JsonRpcError, JsonRpcRequest, JsonRpcResponse, ServerCapabilities,
-    ServerInfo, ToolsCapability, ToolsListResult, MCP_PROTOCOL_VERSION,
+    ServerInfo, ToolCallResult, ToolsCapability, ToolsListResult, MCP_PROTOCOL_VERSION,
 };
 use crate::security::McpSecurityPolicy;
 use crate::tools::{
@@ -108,6 +108,61 @@ impl McpServer {
         self
     }
 
+    /// Despacha una tool MCP conocida por nombre. Retorna `None` si `tool_name` no
+    /// corresponde a ninguna tool registrada (equivalente a "method not found").
+    /// Se ejecuta dentro de una tarea Tokio spawneada por `handle_request` para que
+    /// un panic durante la ejecución quede aislado a esa sola llamada.
+    async fn dispatch_tool(
+        &self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Option<ToolCallResult> {
+        Some(match tool_name {
+            "brain_remember" => {
+                execute_remember(arguments, self.remember_uc.clone(), &self.security).await
+            }
+            "brain_recall" => {
+                execute_recall(arguments, self.recall_uc.clone(), &self.security).await
+            }
+            "brain_search" => {
+                execute_search(arguments, self.recall_uc.clone(), &self.security).await
+            }
+            "brain_forget" => {
+                execute_forget(arguments, self.forget_uc.clone(), &self.security).await
+            }
+            "brain_session_end" => {
+                execute_session_end(arguments, self.expire_session_uc.clone(), &self.security).await
+            }
+            "brain_relate" => {
+                execute_relate(arguments, self.relate_uc.clone(), &self.security).await
+            }
+            "brain_graph" => {
+                execute_graph(arguments, self.traverse_uc.clone(), &self.security).await
+            }
+            "brain_learn" => execute_learn(arguments, self.learn_uc.clone(), &self.security).await,
+            "brain_explain" => {
+                execute_explain(arguments, self.explain_uc.clone(), &self.security).await
+            }
+            "brain_consolidate" => {
+                execute_consolidate(
+                    arguments,
+                    self.reflect_uc.clone(),
+                    self.consolidate_uc.clone(),
+                    &self.security,
+                )
+                .await
+            }
+            "brain_retrieve" => {
+                execute_retrieve(arguments, self.retrieve_uc.clone(), &self.security).await
+            }
+            // Solo compilada en tests: permite probar el mecanismo de aislamiento de
+            // panics de `handle_request` sin depender de un bug real conocido.
+            #[cfg(test)]
+            "__test_panic__" => panic!("panic de prueba: aislamiento de panics en tools/call"),
+            _ => return None,
+        })
+    }
+
     /// Procesa una solicitud JSON-RPC y retorna la respuesta si corresponde.
     /// Para notificaciones (como notifications/initialized), retorna `None`.
     pub async fn handle_request(&self, req: JsonRpcRequest) -> Option<JsonRpcResponse> {
@@ -154,7 +209,7 @@ impl McpServer {
                 };
 
                 let tool_name = match params.get("name").and_then(|v| v.as_str()) {
-                    Some(name) => name,
+                    Some(name) => name.to_string(),
                     None => {
                         return Some(JsonRpcResponse::error(
                             req.id,
@@ -170,56 +225,34 @@ impl McpServer {
                     .cloned()
                     .unwrap_or_else(|| serde_json::json!({}));
 
-                let tool_result = match tool_name {
-                    "brain_remember" => {
-                        execute_remember(arguments, self.remember_uc.clone(), &self.security).await
-                    }
-                    "brain_recall" => {
-                        execute_recall(arguments, self.recall_uc.clone(), &self.security).await
-                    }
-                    "brain_search" => {
-                        execute_search(arguments, self.recall_uc.clone(), &self.security).await
-                    }
-                    "brain_forget" => {
-                        execute_forget(arguments, self.forget_uc.clone(), &self.security).await
-                    }
-                    "brain_session_end" => {
-                        execute_session_end(
-                            arguments,
-                            self.expire_session_uc.clone(),
-                            &self.security,
-                        )
-                        .await
-                    }
-                    "brain_relate" => {
-                        execute_relate(arguments, self.relate_uc.clone(), &self.security).await
-                    }
-                    "brain_graph" => {
-                        execute_graph(arguments, self.traverse_uc.clone(), &self.security).await
-                    }
-                    "brain_learn" => {
-                        execute_learn(arguments, self.learn_uc.clone(), &self.security).await
-                    }
-                    "brain_explain" => {
-                        execute_explain(arguments, self.explain_uc.clone(), &self.security).await
-                    }
-                    "brain_consolidate" => {
-                        execute_consolidate(
-                            arguments,
-                            self.reflect_uc.clone(),
-                            self.consolidate_uc.clone(),
-                            &self.security,
-                        )
-                        .await
-                    }
-                    "brain_retrieve" => {
-                        execute_retrieve(arguments, self.retrieve_uc.clone(), &self.security).await
-                    }
-                    _ => {
+                // Cada tool se despacha en su propia tarea Tokio para que un panic aislado
+                // dentro de un handler (p. ej. un bug futuro similar al de brain_relate,
+                // SRS-tracker 80805145) no se propague hasta `run_stream` y tumbe todo el
+                // proceso MCP: `JoinHandle::await` convierte ese panic en un `Err(JoinError)`
+                // recuperable en vez de un unwind que atraviesa `main()`.
+                let server = self.clone();
+                let dispatch_name = tool_name.clone();
+                let tool_result = match tokio::spawn(async move {
+                    server.dispatch_tool(&dispatch_name, arguments).await
+                })
+                .await
+                {
+                    Ok(Some(result)) => result,
+                    Ok(None) => {
                         return Some(JsonRpcResponse::error(
                             req.id,
-                            JsonRpcError::method_not_found(tool_name),
+                            JsonRpcError::method_not_found(&tool_name),
                         ));
+                    }
+                    Err(join_error) => {
+                        error!(
+                            tool = %tool_name,
+                            error = %join_error,
+                            "Panic aislado durante la ejecución de una tool MCP; el proceso continúa operativo"
+                        );
+                        ToolCallResult::error(format!(
+                            "Error interno inesperado al ejecutar la herramienta '{tool_name}'. El servidor sigue operativo; puede reintentar la llamada."
+                        ))
                     }
                 };
 
@@ -348,6 +381,65 @@ mod tests {
         let resp: JsonRpcResponse = serde_json::from_str(&resp_line).unwrap();
         assert_eq!(resp.id, Some(serde_json::json!(100)));
         assert!(resp.result.is_some());
+
+        drop(client_write);
+        server_task.await.unwrap();
+    }
+
+    /// Regresión: un panic dentro de un tool handler (simulado vía la tool de prueba
+    /// `__test_panic__`, solo compilada en `cfg(test)`) debe quedar aislado por
+    /// `tokio::spawn` + `JoinHandle` en vez de propagarse y tumbar todo el proceso MCP
+    /// — mismo patrón de fondo que causó el bug del tracker en `brain_relate`
+    /// (80805145), ahora cubierto de forma genérica para cualquier tool futura.
+    #[tokio::test]
+    async fn server_isolates_panic_inside_tool_handler_and_keeps_running() {
+        let repo = Arc::new(InMemoryMemoryRepository::new());
+        let remember_uc = Arc::new(RememberUseCase::new(repo.clone()));
+        let recall_uc = Arc::new(RecallUseCase::new(repo.clone()));
+        let forget_uc = Arc::new(ForgetUseCase::new(repo.clone()));
+        let server = McpServer::new(
+            remember_uc,
+            recall_uc,
+            forget_uc,
+            McpSecurityPolicy::new_full(),
+        );
+
+        let (client_read, server_write) = duplex(4096);
+        let (server_read, mut client_write) = duplex(4096);
+
+        let server_task = tokio::spawn(async move {
+            server.run_stream(server_read, server_write).await.unwrap();
+        });
+
+        let mut client_lines = BufReader::new(client_read).lines();
+
+        // 1. Llamada que panica dentro del handler.
+        let panic_req = r#"{"jsonrpc":"2.0","id":200,"method":"tools/call","params":{"name":"__test_panic__","arguments":{}}}"#;
+        client_write.write_all(panic_req.as_bytes()).await.unwrap();
+        client_write.write_all(b"\n").await.unwrap();
+        client_write.flush().await.unwrap();
+
+        let resp_line = client_lines.next_line().await.unwrap().unwrap();
+        let resp: JsonRpcResponse = serde_json::from_str(&resp_line).unwrap();
+        assert_eq!(resp.id, Some(serde_json::json!(200)));
+        // El panic no se convierte en un error de protocolo JSON-RPC: sigue siendo un
+        // resultado de tool normal (isError: true), igual que cualquier otra falla de
+        // negocio — el stream nunca se cierra.
+        let result = resp
+            .result
+            .expect("debe haber result pese al panic aislado");
+        assert_eq!(result["isError"], serde_json::json!(true));
+
+        // 2. El loop del servidor sigue vivo: una segunda llamada normal responde bien.
+        let ping_req = r#"{"jsonrpc":"2.0","id":201,"method":"ping"}"#;
+        client_write.write_all(ping_req.as_bytes()).await.unwrap();
+        client_write.write_all(b"\n").await.unwrap();
+        client_write.flush().await.unwrap();
+
+        let resp_line2 = client_lines.next_line().await.unwrap().unwrap();
+        let resp2: JsonRpcResponse = serde_json::from_str(&resp_line2).unwrap();
+        assert_eq!(resp2.id, Some(serde_json::json!(201)));
+        assert!(resp2.result.is_some());
 
         drop(client_write);
         server_task.await.unwrap();
