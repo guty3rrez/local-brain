@@ -108,7 +108,16 @@ impl RelateUseCase {
                     let label = mem.summary.clone().unwrap_or_else(|| {
                         let text = mem.content.text();
                         if text.len() > 60 {
-                            format!("{}...", &text[..57])
+                            // Truncar por límite de carácter, no de byte: un índice de byte
+                            // fijo puede caer en medio de un carácter UTF-8 multibyte (tildes,
+                            // ñ, emoji) y provocar panic ("byte index is not a char boundary").
+                            let cut = text
+                                .char_indices()
+                                .map(|(i, _)| i)
+                                .take_while(|&i| i <= 57)
+                                .last()
+                                .unwrap_or(0);
+                            format!("{}...", &text[..cut])
                         } else {
                             text.to_string()
                         }
@@ -352,6 +361,44 @@ mod tests {
         let mem_node = graph_repo.find_node_by_memory_id(&memory.id).await.unwrap();
         assert!(mem_node.is_some());
         assert_eq!(mem_node.unwrap().node_type, NodeType::Memory);
+    }
+
+    /// Regresión: `brain_relate` no debe entrar en panic al truncar el label de una
+    /// memoria sin `summary` cuyo texto tiene un carácter UTF-8 multibyte justo en el
+    /// límite de corte (bug del tracker: "MCP se cae ('Connection closed') en
+    /// brain_relate — reproducido SIN concurrencia, tumba la conexión completa del
+    /// servidor"). Un slice por índice de byte fijo (`&text[..57]`) puede caer en medio
+    /// de un carácter como 'ñ'/'á' y entrar en panic, tumbando todo el proceso MCP
+    /// porque `run_stream` no envuelve `handle_request` en `catch_unwind`.
+    #[tokio::test]
+    async fn test_relate_memory_without_summary_and_multibyte_text_does_not_panic() {
+        let graph_repo = Arc::new(InMemoryGraphRepository::new());
+        let mem_repo = Arc::new(InMemoryMemoryRepository::new());
+
+        // 56 bytes ASCII + 'ñ' (2 bytes, ocupa bytes 56..58) + relleno para pasar de 60 bytes:
+        // el corte original en el byte 57 cae exactamente en medio de 'ñ'.
+        let prefix: String = "a".repeat(56);
+        let text = format!("{prefix}ñ resto de texto para pasar de sesenta bytes totales");
+        assert!(text.len() > 60);
+        assert!(!text.is_char_boundary(57));
+
+        let content = MemoryContent::new(text).unwrap();
+        let prov = Provenance::new(MemoryOrigin::UserPrompt);
+        let memory = Memory::new(content, MemoryType::Episodic, prov);
+        mem_repo.save(&memory).await.unwrap();
+
+        let use_case = RelateUseCase::new(graph_repo.clone()).with_memory_repository(mem_repo);
+
+        let cmd = RelateCommand::new(memory.id.to_string(), "Concepto", RelationType::RelatedTo);
+        let edge = use_case.execute(cmd).await.unwrap();
+
+        assert_eq!(edge.relation_type, RelationType::RelatedTo);
+        let mem_node = graph_repo
+            .find_node_by_memory_id(&memory.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(mem_node.label.ends_with("..."));
     }
 
     #[tokio::test]
