@@ -11,6 +11,7 @@
 [![Protocol: Model Context Protocol (MCP)](https://img.shields.io/badge/Protocol-MCP_Standard-blueviolet.svg)](https://modelcontextprotocol.io/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-system-architecture)
 [![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacy--local-first-security)
+[![M8ven Score](https://m8ven.ai/badge/mcp/guty3rrez-local-brain-17fctn)](https://m8ven.ai/mcp/guty3rrez-local-brain-17fctn)
 
 ---
 
