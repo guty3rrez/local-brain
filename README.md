@@ -11,7 +11,7 @@
 [![Protocol: Model Context Protocol (MCP)](https://img.shields.io/badge/Protocol-MCP_Standard-blueviolet.svg)](https://modelcontextprotocol.io/)
 [![Architecture: Hexagonal](https://img.shields.io/badge/Architecture-Clean_%2F_Hexagonal-lightgrey.svg)](#-system-architecture)
 [![Privacy: 100% Offline](https://img.shields.io/badge/Privacy-100%25_Offline-success.svg)](#-privacy--local-first-security)
-[![M8ven Score](https://m8ven.ai/badge/mcp/guty3rrez/local-brain)](https://m8ven.ai/mcp/guty3rrez/local-brain)
+[![M8ven Verified](https://m8ven.ai/api/agent-verify/badge?score=75)](https://m8ven.ai/verified/verify?id=238b8d5549138a68)
 ---
 
 ## ⚡ The Problem: AI Agent Amnesia
