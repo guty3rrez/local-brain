@@ -37,7 +37,8 @@ El script se encargará automáticamente de:
 4. Aplicar las migraciones de base de datos (`brain init`).
 5. Ejecutar un diagnóstico de salud del sistema (`brain doctor`).
 6. **Si detecta la CLI de Claude Code (`claude`)**: instalar el skill del agente en `~/.claude/skills/local-brain` y registrar el servidor MCP con scope `user` (disponible en todos tus repos) — sin pasos manuales.
-7. Imprimir los bloques de configuración MCP listos para el resto de clientes (Claude Desktop, Cursor, Windsurf, Cline).
+7. **Ofrece instalar hooks opcionales de Claude Code** para recall automático: `SessionStart`/`UserPromptSubmit` inyectan recuerdos relevantes sin que el modelo tenga que pedirlos, `PreCompact` le recuerda persistir lo importante antes de compactar, y `SessionEnd` cierra la memoria de trabajo. Pide confirmación explícita porque edita `~/.claude/settings.json` (se guarda un respaldo con timestamp antes). Ver [`scripts/hooks/claude-code/`](../scripts/hooks/claude-code/).
+8. Imprimir los bloques de configuración MCP listos para el resto de clientes (Claude Desktop, Cursor, Windsurf, Cline).
 
 > Con el Método 1 en un sistema con Docker + Claude Code ya instalados, terminas con el stack corriendo, el skill instalado y el MCP conectado en un solo comando — sin editar ningún archivo de configuración a mano.
 
