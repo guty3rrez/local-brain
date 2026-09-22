@@ -307,6 +307,22 @@ mkdir -p ~/.agents/skills/local-brain
 cp -r .agents/skills/local-brain/* ~/.agents/skills/local-brain/
 ```
 
+### 🪝 Automatic Recall via Claude Code Hooks
+
+The skill above relies on the model choosing to call `brain_*` — an optional set of Claude Code
+hooks removes that dependency by calling memory automatically at the right moments: `SessionStart`
+and `UserPromptSubmit` inject relevant memories as context without the model having to ask,
+`PreCompact` reminds the model to persist anything important before compaction, and `SessionEnd`
+closes out working memory. Every hook is fail-open (a slow or offline stack never blocks a turn).
+
+```bash
+scripts/hooks/claude-code/install-hooks.sh    # installs, merges into ~/.claude/settings.json
+scripts/hooks/claude-code/uninstall-hooks.sh  # reverts, only touching Local Brain's own entries
+```
+
+`scripts/quickstart.sh` offers to run this for you (step 6/7) and asks for confirmation first,
+since it edits your global Claude Code settings.
+
 ---
 
 ## 🏛️ System Architecture

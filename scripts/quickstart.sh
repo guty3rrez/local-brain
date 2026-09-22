@@ -9,7 +9,9 @@
 #   4. Diagnostica la salud del sistema (brain doctor)
 #   5. Si detecta Claude Code, instala el skill del agente y registra el MCP
 #      automáticamente (scope global, disponible en todos tus repos)
-#   6. Imprime snippets de configuración MCP para el resto de clientes
+#   6. Ofrece instalar hooks de recall automático en Claude Code (opcional,
+#      pide confirmación explícita porque modifica ~/.claude/settings.json)
+#   7. Imprime snippets de configuración MCP para el resto de clientes
 # ==============================================================================
 
 set -euo pipefail
@@ -27,7 +29,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo -e "${BOLD}${BLUE}🧠 Bienvenido a Local Brain v1.0 — Asistente de Configuración Rápida${NC}\n"
 
 # 1. Verificar Docker
-echo -e "${BOLD}[1/6] Verificando dependencias del sistema...${NC}"
+echo -e "${BOLD}[1/7] Verificando dependencias del sistema...${NC}"
 if ! command -v docker &>/dev/null; then
     echo -e "${RED}❌ Docker no está instalado. Por favor instálalo desde https://docs.docker.com/get-docker/${NC}"
     exit 1
@@ -46,7 +48,7 @@ MODEL_URL="https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/ma
 
 mkdir -p "${MODEL_DIR}"
 if [ ! -f "${MODEL_FILE}" ]; then
-    echo -e "\n${BOLD}[2/6] Descargando modelo de embeddings nomic-embed-text-v1.5 (~140 MB)...${NC}"
+    echo -e "\n${BOLD}[2/7] Descargando modelo de embeddings nomic-embed-text-v1.5 (~140 MB)...${NC}"
     if command -v curl &>/dev/null; then
         curl -L --progress-bar -o "${MODEL_FILE}" "${MODEL_URL}"
     elif command -v wget &>/dev/null; then
@@ -57,7 +59,7 @@ else
 fi
 
 # 3. Iniciar servicios en segundo plano
-echo -e "\n${BOLD}[3/6] Iniciando PostgreSQL 17 (pgvector) y llama.cpp server...${NC}"
+echo -e "\n${BOLD}[3/7] Iniciando PostgreSQL 17 (pgvector) y llama.cpp server...${NC}"
 cd "${ROOT_DIR}"
 docker compose up -d
 
@@ -82,7 +84,7 @@ else
 fi
 
 # 4. Localizar o compilar binario brain
-echo -e "\n${BOLD}[4/6] Verificando binario de Local Brain (brain CLI)...${NC}"
+echo -e "\n${BOLD}[4/7] Verificando binario de Local Brain (brain CLI)...${NC}"
 BRAIN_BIN=""
 if command -v brain &>/dev/null; then
     BRAIN_BIN="$(command -v brain)"
@@ -111,7 +113,7 @@ else
 fi
 
 # 5. Instalar skill de agente + registrar MCP en Claude Code (si está disponible)
-echo -e "\n${BOLD}[5/6] Integrando con Claude Code (skill + MCP)...${NC}"
+echo -e "\n${BOLD}[5/7] Integrando con Claude Code (skill + MCP)...${NC}"
 if command -v claude &>/dev/null && [ "${BRAIN_FOUND}" = true ]; then
     SKILL_SRC="${ROOT_DIR}/.agents/skills/local-brain"
     SKILL_DST="${HOME}/.agents/skills/local-brain"
@@ -135,7 +137,33 @@ else
     echo -e "${YELLOW}ℹ️ Claude Code CLI ('claude') no detectado, o falta el binario 'brain'. Omitiendo integración automática — usa los pasos manuales de abajo.${NC}"
 fi
 
-# 6. Imprimir configuraciones MCP para el resto de agentes
+# 6. Ofrecer instalar hooks de recall automático (opcional, requiere confirmación)
+echo -e "\n${BOLD}[6/7] Hooks opcionales de recall automático en Claude Code...${NC}"
+if command -v claude &>/dev/null && command -v jq &>/dev/null && [ "${BRAIN_FOUND}" = true ]; then
+    echo -e "${BLUE}Los hooks inyectan memoria relevante automáticamente al iniciar sesión y en cada"
+    echo -e "prompt del usuario (SessionStart/UserPromptSubmit), sin depender de que el modelo"
+    echo -e "decida invocar el skill manualmente. Esto modifica ${BOLD}~/.claude/settings.json${NC}${BLUE}"
+    echo -e "(se guarda un respaldo con timestamp antes de tocarlo, y es reversible).${NC}"
+
+    INSTALL_HOOKS="n"
+    if [ -t 0 ]; then
+        read -r -p "¿Instalar los hooks de memoria automática ahora? [s/N] " INSTALL_HOOKS
+    else
+        echo -e "${YELLOW}ℹ️ Sesión no interactiva: omitiendo instalación de hooks. Instálalos luego con:${NC}"
+        echo -e "   ${BOLD}BRAIN_BIN=${BRAIN_BIN} ${SCRIPT_DIR}/hooks/claude-code/install-hooks.sh${NC}"
+    fi
+
+    if [[ "${INSTALL_HOOKS}" =~ ^[sSyY]$ ]]; then
+        BRAIN_BIN="${BRAIN_BIN}" "${SCRIPT_DIR}/hooks/claude-code/install-hooks.sh"
+    else
+        echo -e "${YELLOW}ℹ️ Omitiendo instalación de hooks. Puedes instalarlos después con:${NC}"
+        echo -e "   ${BOLD}BRAIN_BIN=${BRAIN_BIN} ${SCRIPT_DIR}/hooks/claude-code/install-hooks.sh${NC}"
+    fi
+else
+    echo -e "${YELLOW}ℹ️ Se necesita 'claude', 'jq' y el binario 'brain' para instalar hooks. Omitiendo.${NC}"
+fi
+
+# 7. Imprimir configuraciones MCP para el resto de agentes
 echo -e "\n${BOLD}${GREEN}==============================================================================${NC}"
 echo -e "${BOLD}${GREEN}✨ ¡Local Brain está listo para operar!${NC}"
 echo -e "${BOLD}${GREEN}==============================================================================${NC}\n"
@@ -158,7 +186,7 @@ cat << EOF
 }
 EOF
 
-echo -e "\n${BOLD}${BLUE}2. Claude Code CLI${NC} (si el paso [5/6] no pudo hacerlo por ti — el flag ${BOLD}-s user${NC}${BLUE} lo deja disponible en todos tus repos):"
+echo -e "\n${BOLD}${BLUE}2. Claude Code CLI${NC} (si el paso [5/7] no pudo hacerlo por ti — el flag ${BOLD}-s user${NC}${BLUE} lo deja disponible en todos tus repos):"
 echo -e "${BOLD}claude mcp add local-brain ${BRAIN_BIN} -s user -- --database-url postgres://localbrain:localbrain_secret@localhost:5433/local_brain --embedding-url http://127.0.0.1:8081/embedding mcp${NC}\n"
 
 echo -e "${BOLD}${BLUE}3. Cursor / Windsurf${NC} (en .cursor/mcp.json o mcp_config.json):"

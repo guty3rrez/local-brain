@@ -179,6 +179,66 @@ async fn cli_semantic_recall_with_mock_provider() {
         .stdout(predicate::str::contains(&content));
 }
 
+#[tokio::test]
+async fn cli_retrieve_json_format() {
+    let mock_server = wiremock::MockServer::start().await;
+    let dummy_embedding: Vec<f32> = (0..768).map(|i| (i as f32) / 1000.0).collect();
+    let response_body = serde_json::json!({
+        "embedding": dummy_embedding
+    });
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/embedding"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(response_body))
+        .mount(&mock_server)
+        .await;
+
+    let emb_url = format!("{}/embedding", mock_server.uri());
+    let tag = uuid::Uuid::new_v4().to_string();
+    let project = format!("cli-retrieve-json-{tag}");
+    let content = format!("Recuperación híbrida combina vector, FTS y grafo [{tag}]");
+
+    let mut rem_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    rem_cmd
+        .arg("--embedding-url")
+        .arg(&emb_url)
+        .arg("remember")
+        .arg(&content)
+        .arg("--project")
+        .arg(&project)
+        .assert()
+        .success();
+
+    let mut retrieve_cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");
+    let output = retrieve_cmd
+        .arg("--embedding-url")
+        .arg(&emb_url)
+        .arg("retrieve")
+        .arg("--json")
+        .arg("--project")
+        .arg(&project)
+        .arg("recuperación híbrida vector FTS grafo")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"items\":"))
+        .stdout(predicate::str::contains("\"metrics\":"))
+        .stdout(predicate::str::contains("\"assembled_context\":"))
+        .stdout(predicate::str::contains("<untrusted_memory_context>"))
+        .get_output()
+        .stdout
+        .clone();
+
+    // El JSON debe ser válido y machine-parseable (consumido por scripts de
+    // hooks vía `jq`, no solo por humanos leyendo texto).
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output).expect("salida de --json debe ser JSON válido");
+    assert!(parsed["items"].is_array());
+    assert!(parsed["assembled_context"]
+        .as_str()
+        .unwrap()
+        .contains(&content));
+}
+
 #[test]
 fn cli_mcp_help_command() {
     let mut cmd = Command::cargo_bin("brain").expect("Binario 'brain' disponible");

@@ -231,6 +231,10 @@ struct RetrieveArgs {
     #[arg(short = 'e', long = "explain")]
     explain: bool,
 
+    /// Salida en formato JSON estructurado, legible por máquinas y agentes (hooks, scripts)
+    #[arg(long)]
+    json: bool,
+
     /// Ruta opcional a un archivo de configuración brain.toml personalizado
     #[arg(short = 'c', long = "config")]
     config: Option<String>,
@@ -1924,6 +1928,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             match use_case.execute(query).await {
+                Ok(result) if args.json => match serde_json::to_string_pretty(&result) {
+                    Ok(json_str) => println!("{json_str}"),
+                    Err(e) => {
+                        eprintln!("❌ Error serializando recuperación híbrida a JSON: {e}");
+                        std::process::exit(1);
+                    }
+                },
                 Ok(result) => {
                     println!("🧠 Local Brain — Recuperación Híbrida Avanzada (SRS §13, §14, §56)");
                     println!("─────────────────────────────────────────────────────────────────────────────");
